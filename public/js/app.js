@@ -627,21 +627,25 @@ class ImutavelStudioApp {
     ];
     const combinedStream = new MediaStream(combinedTracks);
 
-    let mimeType = "video/webm;codecs=vp9,opus";
-    let fileExt = "webm";
+    const preferredMp4Types = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1.4d002a,mp4a.40.2",
+      "video/mp4;codecs=avc1,mp4a.40.2",
+      "video/mp4;codecs=h264,aac",
+      "video/mp4;codecs=avc1,opus",
+      "video/mp4",
+      "video/webm;codecs=h264,opus",
+      "video/webm;codecs=vp9,opus",
+      "video/webm"
+    ];
+
+    let mimeType = "video/mp4";
     if (typeof MediaRecorder !== "undefined") {
-      if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")) {
-        mimeType = "video/webm;codecs=vp9,opus";
-        fileExt = "webm";
-      } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")) {
-        mimeType = "video/webm;codecs=vp8,opus";
-        fileExt = "webm";
-      } else if (MediaRecorder.isTypeSupported("video/webm")) {
-        mimeType = "video/webm";
-        fileExt = "webm";
-      } else if (MediaRecorder.isTypeSupported("video/mp4")) {
-        mimeType = "video/mp4";
-        fileExt = "mp4";
+      for (const candidate of preferredMp4Types) {
+        if (MediaRecorder.isTypeSupported(candidate)) {
+          mimeType = candidate;
+          break;
+        }
       }
     }
 
@@ -663,7 +667,7 @@ class ImutavelStudioApp {
 
     this.mediaRecorder.onstop = () => {
       const blob = new Blob(this.recordedChunks, {
-        type: fileExt === "mp4" ? "video/mp4" : "video/webm"
+        type: "video/mp4"
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -672,14 +676,14 @@ class ImutavelStudioApp {
         .replace(/[^a-z0-9]+/g, "_")
         .substring(0, 35);
       a.href = url;
-      a.download = `imutavel_${this.currentProject.format}_${safeName}.${fileExt}`;
+      a.download = `imutavel_${this.currentProject.format}_${safeName}.mp4`;
       document.body.appendChild(a);
       a.click();
       a.remove();
 
-      this.showToast("Vídeo exportado com Voz de Filósofo, Tempo Sincronizado e Legenda PT-BR!");
+      this.showToast("Vídeo .MP4 exportado com Voz de Filósofo, Tempo Sincronizado e Legenda PT-BR!");
       exportBtn.disabled = false;
-      exportBtn.innerHTML = `🎬 Exportar Vídeo (${this.currentProject.format.toUpperCase()})`;
+      exportBtn.innerHTML = `🎬 Exportar Vídeo (.MP4)`;
     };
 
     this.isRecording = true;
