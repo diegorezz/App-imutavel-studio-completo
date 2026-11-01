@@ -1,10 +1,15 @@
 /**
- * MOTOR CINEMATOGRÁFICO 2.5D E ÁUDIO ORGÂNICO — IMUTÁVEL STUDIO (V4)
- * Aperfeiçoamentos baseados na análise do Projeto Teste e referência Reel:
- *  1. Voz 100% humana e natural (sem delay metálico, sem pitch-shift artificial) + medição automática da duração exata da fala.
- *  2. Fim do zumbido contínuo de oscilador: substituído por Vento Realista da Serra, Estalar Orgânico de Fogueira e Notas Acústicas Espaçadas com envelope ADSR suave.
- *  3. Cenários com realismo natural: Montanhas rochosas facetadas em 3D (faces de luz e sombra), Via Láctea, nuvens volumétricas, pinheiros de altitude, capim dourado ao vento e fogueira realista com brasas e iluminação de contorno (rim-light).
- *  4. Personagem com proporções anatômicas reais e enquadramentos cinematográficos (contemplação em 3/4 diante do abismo, caminhada lateral com parallax real do terreno e vigília iluminada pelo fogo).
+ * MOTOR CINEMATOGRÁFICO 2.5D E ÁUDIO ORGÂNICO — IMUTÁVEL STUDIO (V5)
+ *
+ * Melhorias V5:
+ *  1. Voz Neural Masculina de Filósofo (PT-BR) com desbloqueio imediato de áudio para iOS/Android
+ *     e garantia de timbre masculino (nunca cai em voz robótica feminina no celular).
+ *  2. Correção definitiva do alinhamento de textos no Canvas em iOS Safari / Android (zero emojis
+ *     dentro de fillText e centralização matemática por measureText).
+ *  3. Remodelagem completa do Personagem e da Animação baseada fielmente nas fotos reais da Serra
+ *     (traje branco com dobras de tecido, chapéu com pano branco de nuca esvoaçando ao vento,
+ *     mochila preta com isolante térmico azul no topo, luvas longas de proteção, cajado longo de
+ *     madeira avermelhada, poses contemplativas em perfil 3/4 e caminhada orgânica na trilha).
  */
 
 class ImutavelAudioEngine {
@@ -17,10 +22,23 @@ class ImutavelAudioEngine {
     this.chordInterval = null;
     this.crackleInterval = null;
     this.currentVoiceSource = null;
+    this.htmlAudioEl = null;
     this.isPlaying = false;
     this.currentPreset = "mountain_wind_432";
     this.voiceProfile = "philosopher_deep";
     this.ttsCache = new Map();
+    this.ttsBlobCache = new Map();
+    this.unlocked = false;
+
+    this.bindMobileAudioUnlock();
+  }
+
+  bindMobileAudioUnlock() {
+    const unlock = () => {
+      this.unlockMobileAudio();
+    };
+    window.addEventListener("touchstart", unlock, { passive: true, once: true });
+    window.addEventListener("click", unlock, { passive: true, once: true });
   }
 
   init() {
@@ -29,17 +47,16 @@ class ImutavelAudioEngine {
       this.ctx = new AudioCtx();
       this.dest = this.ctx.createMediaStreamDestination();
 
-      // Canal de ambiência da natureza (suave e orgânico)
+      // Canal de ambiência da natureza
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.14;
+      this.masterGain.gain.value = 0.13;
       this.masterGain.connect(this.ctx.destination);
       this.masterGain.connect(this.dest);
 
-      // Canal de Voz Neural Pura (SEM delay metálico e SEM alteração de pitch/velocidade)
+      // Canal de Voz Neural Pura
       this.voiceGain = this.ctx.createGain();
       this.voiceGain.gain.value = 1.0;
 
-      // Apenas um leve filtro de calor acústico natural (2dB em 150Hz)
       this.warmthFilter = this.ctx.createBiquadFilter();
       this.warmthFilter.type = "lowshelf";
       this.warmthFilter.frequency.value = 150;
@@ -49,9 +66,29 @@ class ImutavelAudioEngine {
       this.voiceGain.connect(this.ctx.destination);
       this.voiceGain.connect(this.dest);
     }
-    if (this.ctx.state === "suspended") {
-      this.ctx.resume();
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
     }
+  }
+
+  /**
+   * Desbloqueia o AudioContext sincronamente no toque do usuário em celulares (iOS Safari / Android)
+   */
+  unlockMobileAudio() {
+    try {
+      this.init();
+      if (this.ctx && !this.unlocked) {
+        const silentBuf = this.ctx.createBuffer(1, 1, 22050);
+        const src = this.ctx.createBufferSource();
+        src.buffer = silentBuf;
+        src.connect(this.ctx.destination);
+        src.start(0);
+        this.unlocked = true;
+      }
+      if (this.ctx && this.ctx.state === "suspended") {
+        this.ctx.resume().catch(() => {});
+      }
+    } catch (e) {}
   }
 
   getAudioStream() {
@@ -68,19 +105,22 @@ class ImutavelAudioEngine {
       } catch (e) {}
       this.currentVoiceSource = null;
     }
+    if (this.htmlAudioEl) {
+      try {
+        this.htmlAudioEl.pause();
+        this.htmlAudioEl.currentTime = 0;
+      } catch (e) {}
+      this.htmlAudioEl = null;
+    }
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
   }
 
-  /**
-   * Pré-carrega e decodifica o áudio neural da cena, retornando o AudioBuffer
-   * e sua duração exata em segundos para que o Agente IA ajuste o tempo da cena automaticamente!
-   */
   async prepareSceneAudio(text, voiceProfile = "philosopher_deep") {
     this.init();
     const cleanText = (text || "").replace(/[""]/g, "").trim();
-    if (!cleanText) return { buffer: null, duration: 5.0 };
+    if (!cleanText) return { buffer: null, duration: 5.5 };
 
     const cacheKey = `${voiceProfile}:${cleanText}`;
     if (this.ttsCache.has(cacheKey)) {
@@ -95,31 +135,44 @@ class ImutavelAudioEngine {
       if (!resp.ok) throw new Error("TTS HTTP " + resp.status);
       const arrayBuf = await resp.arrayBuffer();
       if (arrayBuf.byteLength < 200) throw new Error("Empty audio");
-      const audioBuffer = await this.ctx.decodeAudioData(arrayBuf);
+
+      // Salva também um Blob URL para reprodução mobile direta se necessário
+      const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
+      this.ttsBlobCache.set(cacheKey, URL.createObjectURL(blob));
+
+      const audioBuffer = await new Promise((resolve, reject) => {
+        this.ctx.decodeAudioData(
+          arrayBuf.slice(0),
+          (decoded) => resolve(decoded),
+          (err) => reject(err)
+        );
+      });
+
       this.ttsCache.set(cacheKey, audioBuffer);
       return { buffer: audioBuffer, duration: audioBuffer.duration };
     } catch (e) {
-      // Estimativa caso offline (~13 caracteres por segundo em leitura pausada)
-      const estimated = Math.max(4.5, cleanText.length / 13.5);
+      const estimated = Math.max(4.8, cleanText.length / 13.5);
       return { buffer: null, duration: estimated };
     }
   }
 
-  /**
-   * Reproduz a voz neural em velocidade 1.0 nativa (100% humana, sem robotização)
-   */
   async speakPhilosopher(text, voiceProfile = "philosopher_deep", onComplete = null) {
     this.stopVoice();
-    this.init();
+    this.unlockMobileAudio();
     this.voiceProfile = voiceProfile;
 
-    const { buffer } = await this.prepareSceneAudio(text, voiceProfile);
+    const cleanText = (text || "").replace(/[""]/g, "").trim();
+    const cacheKey = `${voiceProfile}:${cleanText}`;
+    const { buffer, duration } = await this.prepareSceneAudio(cleanText, voiceProfile);
 
-    if (buffer) {
+    if (buffer && this.ctx) {
       this.stopVoice();
+      if (this.ctx.state === "suspended") {
+        await this.ctx.resume().catch(() => {});
+      }
       const source = this.ctx.createBufferSource();
       source.buffer = buffer;
-      source.playbackRate.value = 1.0; // Velocidade nativa 1.0 = zero distorção robótica!
+      source.playbackRate.value = 1.0;
       source.connect(this.warmthFilter);
       this.currentVoiceSource = source;
       source.onended = () => {
@@ -129,33 +182,34 @@ class ImutavelAudioEngine {
         }
       };
       source.start(0);
-    } else if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = "pt-BR";
-      utter.rate = 0.94;
-      utter.pitch = 0.95;
-      utter.onend = () => {
+      return { duration: buffer.duration };
+    }
+
+    // Fallback secundário com Blob MP3 da API Neural (caso decodeAudioData falhe em algum WebKit antigo)
+    if (this.ttsBlobCache.has(cacheKey)) {
+      const audio = new Audio(this.ttsBlobCache.get(cacheKey));
+      this.htmlAudioEl = audio;
+      audio.onended = () => {
         if (onComplete) onComplete();
       };
-      window.speechSynthesis.speak(utter);
+      audio.play().catch(() => {});
+      return { duration };
     }
+
+    return { duration };
   }
 
-  /**
-   * Paisagem Sonora Orgânica da Natureza (Vento Suave, Fogueira Realista e Notas Acústicas Espaçadas)
-   */
   startAmbient(preset = "mountain_wind_432") {
     this.stopAmbient();
-    this.init();
+    this.unlockMobileAudio();
     this.currentPreset = preset;
     this.isPlaying = true;
 
-    if (preset === "none") return;
+    if (preset === "none" || !this.ctx) return;
 
     const now = this.ctx.currentTime;
 
-    // 1. Gerador de Ruído Rosa (Pink Noise) para Vento Natural nas Árvores/Montanha
+    // 1. Ruído Rosa de Brisa da Serra
     const bufferSize = this.ctx.sampleRate * 4;
     const noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
     const output = noiseBuffer.getChannelData(0);
@@ -168,7 +222,7 @@ class ImutavelAudioEngine {
       b3 = 0.86650 * b3 + white * 0.3104856;
       b4 = 0.55000 * b4 + white * 0.5329522;
       b5 = -0.7616 * b5 - white * 0.0168980;
-      output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.04;
+      output[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.038;
       b6 = white * 0.115926;
     }
 
@@ -178,18 +232,17 @@ class ImutavelAudioEngine {
 
     const windFilter = this.ctx.createBiquadFilter();
     windFilter.type = "lowpass";
-    windFilter.frequency.setValueAtTime(220, now);
+    windFilter.frequency.setValueAtTime(210, now);
 
-    // LFO lento para simular brisa suave soprando e acalmando
     const lfo = this.ctx.createOscillator();
-    lfo.frequency.value = 0.14; // Ciclo de 7 segundos
+    lfo.frequency.value = 0.13;
     const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 90;
+    lfoGain.gain.value = 85;
     lfo.connect(lfoGain);
     lfoGain.connect(windFilter.frequency);
 
     const windGain = this.ctx.createGain();
-    windGain.gain.setValueAtTime(0.35, now);
+    windGain.gain.setValueAtTime(0.32, now);
 
     pinkNoise.connect(windFilter);
     windFilter.connect(windGain);
@@ -199,7 +252,7 @@ class ImutavelAudioEngine {
     lfo.start();
     this.activeNodes.push(pinkNoise, lfo);
 
-    // 2. Estalar Orgânico de Fogueira (se campfire_night)
+    // 2. Estalar Orgânico de Fogueira
     if (preset === "campfire_night") {
       this.crackleInterval = setInterval(() => {
         if (!this.isPlaying || !this.ctx) return;
@@ -209,12 +262,12 @@ class ImutavelAudioEngine {
       }, 280);
     }
 
-    // 3. Notas Acústicas / Harpa Meditativa Espaçada (com envelope ADSR suave, sem zumbido contínuo!)
+    // 3. Notas Acústicas Meditativas Espaçadas
     const scales = {
-      mountain_wind_432: [220, 261.63, 293.66, 329.63, 392.00, 440], // Lá menor natural suave
-      campfire_night: [196.00, 220, 261.63, 293.66, 329.63],
-      harmonic_528: [261.63, 293.66, 329.63, 392.00, 528.00],
-      deep_theta_396: [174.61, 196.00, 220.00, 261.63, 293.66]
+      mountain_wind_432: [220, 261.63, 293.66, 329.63, 392.0, 440],
+      campfire_night: [196.0, 220, 261.63, 293.66, 329.63],
+      harmonic_528: [261.63, 293.66, 329.63, 392.0, 528.0],
+      deep_theta_396: [174.61, 196.0, 220.0, 261.63, 293.66]
     };
     const notes = scales[preset] || scales.mountain_wind_432;
     let noteIdx = 0;
@@ -235,14 +288,13 @@ class ImutavelAudioEngine {
       subOsc.type = "triangle";
       subOsc.frequency.setValueAtTime(freq * 0.5, t);
 
-      // Envelope de nota dedilhada / pad suave que desaparece naturalmente
       noteGain.gain.setValueAtTime(0.001, t);
-      noteGain.gain.linearRampToValueAtTime(0.09, t + 0.8);
+      noteGain.gain.linearRampToValueAtTime(0.085, t + 0.8);
       noteGain.gain.exponentialRampToValueAtTime(0.0008, t + 4.2);
 
       const lp = this.ctx.createBiquadFilter();
       lp.type = "lowpass";
-      lp.frequency.setValueAtTime(480, t);
+      lp.frequency.setValueAtTime(460, t);
 
       osc.connect(lp);
       subOsc.connect(lp);
@@ -256,7 +308,7 @@ class ImutavelAudioEngine {
     };
 
     playGentleNote();
-    this.chordInterval = setInterval(playGentleNote, 4200);
+    this.chordInterval = setInterval(playGentleNote, 4300);
   }
 
   triggerFireCrackle() {
@@ -265,7 +317,7 @@ class ImutavelAudioEngine {
     const g = this.ctx.createGain();
     osc.type = "sawtooth";
     osc.frequency.setValueAtTime(800 + Math.random() * 1400, t);
-    g.gain.setValueAtTime(0.04 * Math.random(), t);
+    g.gain.setValueAtTime(0.038 * Math.random(), t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
     osc.connect(g);
     g.connect(this.masterGain);
@@ -332,103 +384,116 @@ class ImutavelCanvasEngine {
   }
 
   initNaturalWorld() {
-    // Estrelas realistas com tamanhos e temperaturas de cor variadas
     this.stars = [];
     for (let i = 0; i < 160; i++) {
       const colors = ["#ffffff", "#ffe9d2", "#d4e6ff", "#fff4c2"];
       this.stars.push({
         x: Math.random(),
-        y: Math.random() * 0.56,
-        r: Math.random() * 2.1 + 0.4,
+        y: Math.random() * 0.54,
+        r: Math.random() * 2.0 + 0.4,
         color: colors[i % colors.length],
         phase: Math.random() * Math.PI * 2,
-        speed: 1.5 + Math.random() * 2.5
+        speed: 1.4 + Math.random() * 2.2
       });
     }
 
-    // Fagulhas da fogueira / pólen dourado da montanha
     this.embers = [];
-    for (let i = 0; i < 65; i++) {
+    for (let i = 0; i < 60; i++) {
       this.embers.push({
         x: Math.random(),
         y: Math.random(),
-        r: Math.random() * 3.2 + 0.8,
-        vx: (Math.random() - 0.35) * 0.0009,
-        vy: -Math.random() * 0.0018 - 0.0005,
+        r: Math.random() * 3.0 + 0.8,
+        vx: (Math.random() - 0.35) * 0.0008,
+        vy: -Math.random() * 0.0017 - 0.0005,
         alpha: Math.random() * 0.75 + 0.25,
         phase: Math.random() * Math.PI * 2
       });
     }
 
-    // Águias / falcões planando nos ventos térmicos do cânion
     this.birds = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       this.birds.push({
         x: Math.random(),
-        y: 0.14 + Math.random() * 0.22,
-        speed: 0.015 + Math.random() * 0.014,
+        y: 0.14 + Math.random() * 0.20,
+        speed: 0.014 + Math.random() * 0.012,
         wingPhase: Math.random() * Math.PI * 2,
-        scale: 0.55 + Math.random() * 0.65
+        scale: 0.55 + Math.random() * 0.6
       });
     }
 
-    // Nuvens volumétricas e neblina de vale
     this.clouds = [];
     for (let i = 0; i < 8; i++) {
       this.clouds.push({
         x: (i / 8) * 1.4 - 0.2,
         y: 0.36 + (i % 4) * 0.065,
-        w: 0.38 + (i % 3) * 0.14,
+        w: 0.35 + (i % 3) * 0.14,
         h: 0.045 + (i % 2) * 0.025,
-        speed: (i % 2 === 0 ? 1 : -1) * (0.004 + (i % 3) * 0.002)
+        speed: 0.004 + (i % 3) * 0.0025,
+        alpha: 0.16 + (i % 3) * 0.08
       });
     }
 
-    // Tufo de capim dourado de altitude / vegetação rupestre da Chapada
+    // Pedrinhas brancas de quartzo da serra (fiéis às fotos ref_montanha_1 e ref_montanha_4)
+    this.quartzPebbles = [];
+    for (let i = 0; i < 95; i++) {
+      this.quartzPebbles.push({
+        x: (i / 95) * 1.2 - 0.1 + (Math.random() - 0.5) * 0.02,
+        yOffset: Math.random() * 145 + 6,
+        rx: 4 + Math.random() * 9,
+        ry: 2.5 + Math.random() * 5,
+        rot: Math.random() * Math.PI,
+        shade: 0.75 + Math.random() * 0.25
+      });
+    }
+
+    // Tufos de vegetação rupestre e capim dourado da serra
     this.grassTufts = [];
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 36; i++) {
       this.grassTufts.push({
-        x: (i / 28) * 1.3 - 0.15,
-        h: 18 + (i % 5) * 7,
+        x: (i / 36) * 1.16 - 0.08,
+        h: 18 + (i % 5) * 8,
         blades: 4 + (i % 4),
         phase: i * 0.7
       });
     }
 
-    // Geometria das Cordilheiras Rochosas Facetadas (pré-calculada para relevo 3D realista)
+    // Cordilheiras rochosas estratificadas da Chapada/Serra
     this.mountainRidges = [
-      this.generateFacetedRidge(22, 0.41, 0.095, 11),
-      this.generateFacetedRidge(18, 0.49, 0.078, 27),
-      this.generateFacetedRidge(15, 0.56, 0.058, 43)
+      this.generateFacetedRidge(14, 0.39, 0.12, 11),
+      this.generateFacetedRidge(16, 0.48, 0.11, 29),
+      this.generateFacetedRidge(18, 0.57, 0.09, 47)
     ];
   }
 
-  generateFacetedRidge(segments, baseYRatio, ampRatio, seed) {
+  generateFacetedRidge(segments, baseY, amp, seed) {
     const pts = [];
     for (let i = 0; i <= segments; i++) {
       const t = i / segments;
-      const n1 = Math.sin(t * Math.PI * 3.5 + seed);
-      const n2 = Math.cos(t * Math.PI * 7.2 - seed * 1.7) * 0.5;
-      const n3 = Math.sin(t * Math.PI * 13.0 + seed * 0.4) * 0.22;
-      const elevation = (n1 + n2 + n3) * ampRatio;
+      const n1 = Math.sin(t * Math.PI * 3.2 + seed) * amp * 0.55;
+      const n2 = Math.cos(t * Math.PI * 6.5 + seed * 1.7) * amp * 0.30;
+      const n3 = Math.sin(t * Math.PI * 11.0 + seed * 2.3) * amp * 0.15;
+      const y = baseY - Math.abs(n1 + n2) + n3;
       pts.push({
-        t,
-        yRatio: baseYRatio - Math.abs(elevation),
-        ridgeDrop: 0.04 + Math.abs(n2) * 0.06
+        x: t,
+        y,
+        ridgeXOffset: (Math.sin(i * 4.1 + seed) * 0.03)
       });
     }
     return pts;
   }
 
   setFormat(formatKey) {
-    const spec = this.formats[formatKey] || this.formats.reels;
+    if (!this.formats[formatKey]) formatKey = "reels";
     this.currentFormat = formatKey;
+    const spec = this.formats[formatKey];
     this.canvas.width = spec.width;
     this.canvas.height = spec.height;
   }
 
-  updateConfig(cfg) {
-    if (cfg.format && cfg.format !== this.currentFormat) this.setFormat(cfg.format);
+  updateConfig(cfg = {}) {
+    if (cfg.format && cfg.format !== this.currentFormat) {
+      this.setFormat(cfg.format);
+    }
     if (cfg.environment) this.environment = cfg.environment;
     if (cfg.pose) this.pose = cfg.pose;
     if (cfg.headgear) this.headgear = cfg.headgear;
@@ -442,7 +507,7 @@ class ImutavelCanvasEngine {
     if (cfg.totalProgress !== undefined) this.totalProgress = cfg.totalProgress;
     if (cfg.sceneIndex !== undefined) {
       if (cfg.sceneIndex !== this.lastSceneIndex) {
-        this.transitionAlpha = 0.65;
+        this.transitionAlpha = 0.42;
         this.lastSceneIndex = cfg.sceneIndex;
       }
       this.sceneIndex = cfg.sceneIndex;
@@ -450,52 +515,54 @@ class ImutavelCanvasEngine {
     if (cfg.totalScenes !== undefined) this.totalScenes = cfg.totalScenes;
   }
 
-  getDynamicCameraTransform() {
-    const p = this.sceneProgress;
-    let zoom = 1.04;
-    let panX = 0;
-    let panY = 0;
+  getCameraTransform(W, H) {
+    const p = this.sceneProgress || 0;
+    const smoothP = p * p * (3 - 2 * p);
+    let scale = this.cameraZoom || 1.05;
+    let tx = 0;
+    let ty = 0;
 
     switch (this.cameraMotion) {
       case "pan_right_zoom_in":
-        zoom = 1.02 + p * 0.09;
-        panX = -28 + p * 56;
-        panY = 8 - p * 16;
+        scale = 1.02 + smoothP * 0.08;
+        tx = -W * 0.02 + smoothP * (W * 0.04);
         break;
       case "pan_left_wide":
-        zoom = 1.04 + Math.sin(p * Math.PI) * 0.04;
-        panX = 34 - p * 68;
-        break;
-      case "dramatic_rise":
-        zoom = 1.04 + p * 0.10;
-        panY = 30 - p * 60;
-        break;
-      case "orbit_center":
-        zoom = 1.06 + Math.sin(this.time * 0.6) * 0.03;
-        panX = Math.sin(p * Math.PI * 2) * 24;
-        panY = Math.cos(p * Math.PI * 2) * 12;
-        break;
-      case "close_contemplation":
-        zoom = 1.12 + p * 0.08;
-        panY = -22 - p * 18;
-        break;
-      case "slow_pull_out":
-        zoom = 1.14 - p * 0.10;
-        panY = -14 + p * 14;
+        scale = 1.05 - smoothP * 0.03;
+        tx = W * 0.025 - smoothP * (W * 0.05);
         break;
       case "slow_push_in":
-      default:
-        zoom = 1.02 + p * 0.09;
-        panY = 10 - p * 20;
+        scale = 1.0 + smoothP * 0.10;
+        ty = -H * 0.015 * smoothP;
         break;
+      case "slow_pull_out":
+        scale = 1.11 - smoothP * 0.09;
+        ty = -H * 0.015 * (1 - smoothP);
+        break;
+      case "dramatic_rise":
+        scale = 1.04 + smoothP * 0.06;
+        ty = H * 0.025 - smoothP * (H * 0.05);
+        break;
+      case "close_contemplation":
+        scale = 1.10 + Math.sin(smoothP * Math.PI) * 0.05;
+        ty = -H * 0.025;
+        break;
+      case "orbit_center":
+        scale = 1.04 + Math.sin(smoothP * Math.PI) * 0.04;
+        tx = Math.cos(smoothP * Math.PI) * (W * 0.02);
+        break;
+      default:
+        scale = 1.03 + smoothP * 0.04;
     }
-    return { zoom, panX, panY };
+
+    return { scale, tx, ty };
   }
 
-  render(dt) {
+  render(dt = 0.016) {
     this.time += dt;
+    this.blinkTimer += dt;
     if (this.transitionAlpha > 0) {
-      this.transitionAlpha = Math.max(0, this.transitionAlpha - dt * 1.2);
+      this.transitionAlpha = Math.max(0, this.transitionAlpha - dt * 1.4);
     }
 
     const ctx = this.ctx;
@@ -505,1044 +572,1247 @@ class ImutavelCanvasEngine {
     ctx.save();
     ctx.clearRect(0, 0, W, H);
 
-    const cam = this.getDynamicCameraTransform();
+    // 1. Transformação Cinematográfica de Câmera
+    const cam = this.getCameraTransform(W, H);
     ctx.save();
-    ctx.translate(W / 2 + cam.panX, H * 0.42 + cam.panY);
-    ctx.scale(cam.zoom, cam.zoom);
-    ctx.translate(-W / 2, -H * 0.42);
+    ctx.translate(W / 2 + cam.tx, H / 2 + cam.ty);
+    ctx.scale(cam.scale, cam.scale);
+    ctx.translate(-W / 2, -H / 2);
 
-    // 1. Paisagem Natural Realista (Céu, Sol/Via Láctea, Cordilheiras 3D Facetadas, Pinheiros, Penhasco e Fogueira)
-    this.drawRealisticNatureEnvironment(ctx, W, H);
+    // 2. Céu Atmosférico, Astros e Cordilheiras Rochosas
+    this.drawEnvironment(ctx, W, H);
 
-    // 2. Halo Sagrado Atmosférico Sutil (Integrado à Natureza)
-    this.drawAtmosphericSacredHalo(ctx, W, H);
+    // 3. Geometria Sagrada Sutil no Horizonte
+    if (this.sacredOverlay && this.sacredOverlay !== "none") {
+      this.drawSacredGeometry(ctx, W, H);
+    }
 
-    // 3. Personagem Ilustrado Cinematográfico (Proporções humanas reais e movimento fluido)
-    this.drawCinematicMountainSage(ctx, W, H);
+    // 4. Pássaros na Serra
+    this.drawMountainBirds(ctx, W, H);
 
-    // 4. Vegetação em primeiro plano, brasas da fogueira e neblina frontal
+    // 5. Fogueira Viva (quando aplicável)
+    const hasCampfire =
+      this.environment === "night_campfire" || this.pose === "campfire_circle";
+    if (hasCampfire) {
+      this.drawCampfire(ctx, W * 0.30, H * 0.675, W, H);
+    }
+
+    // 6. Personagem Remodelado (Ilustração Cinematográfica 3/4 & Perfil Fiel à Referência)
+    this.drawCharacterV5(ctx, W, H, hasCampfire);
+
+    // 7. Vegetação Rupestre e Fagulhas no Primeiro Plano
     this.drawForegroundNatureAndEmbers(ctx, W, H);
 
     ctx.restore();
 
-    // Transição cinematográfica suave entre cenas
+    // 8. Vinheta Cinematográfica Suave
+    this.drawCinematicVignette(ctx, W, H);
+
+    // 9. Crossfade entre cenas
     if (this.transitionAlpha > 0.01) {
-      ctx.fillStyle = `rgba(12, 18, 28, ${this.transitionAlpha * 0.65})`;
+      ctx.fillStyle = `rgba(8, 12, 22, ${this.transitionAlpha})`;
       ctx.fillRect(0, 0, W, H);
     }
 
-    // 5. HUD e Legenda em Português-BR
+    // 10. HUD e Legendas em Português-BR (100% Centralizadas em Mobile iOS/Android)
     this.drawVideoHUDAndCaptions(ctx, W, H);
 
     ctx.restore();
   }
 
-  /**
-   * CENÁRIOS NATURAIS REALISTAS:
-   * Céu atmosférico, Via Láctea / Sol com dispersão de luz, Montanhas Facetadas 3D com faces de luz e sombra,
-   * Pinheiros e árvores da serra, Mar de Nuvens e Fogueira Realista no acampamento.
-   */
-  drawRealisticNatureEnvironment(ctx, W, H) {
-    const env = this.environment;
-    const isWalking = this.pose === "walking_trail";
-    const worldScroll = isWalking ? this.time * 42 : Math.sin(this.time * 0.25) * 14;
+  drawCinematicVignette(ctx, W, H) {
+    const vig = ctx.createRadialGradient(
+      W / 2,
+      H * 0.45,
+      W * 0.32,
+      W / 2,
+      H * 0.5,
+      H * 0.78
+    );
+    vig.addColorStop(0, "rgba(0,0,0,0)");
+    vig.addColorStop(1, "rgba(4, 7, 14, 0.52)");
+    ctx.fillStyle = vig;
+    ctx.fillRect(0, 0, W, H);
+  }
 
-    // 1. CÉU ATMOSFÉRICO MULTICAMADAS
-    const skyGrad = ctx.createLinearGradient(0, -80, 0, H * 0.72);
-    if (env === "mountain_dawn") {
-      skyGrad.addColorStop(0, "#091326");
-      skyGrad.addColorStop(0.28, "#1e375a");
-      skyGrad.addColorStop(0.55, "#785c69");
-      skyGrad.addColorStop(0.78, "#e3985b");
-      skyGrad.addColorStop(1, "#ffdfa8");
-    } else if (env === "summit_sunset") {
-      skyGrad.addColorStop(0, "#0f091d");
-      skyGrad.addColorStop(0.28, "#3b1d4a");
-      skyGrad.addColorStop(0.56, "#9c3b49");
-      skyGrad.addColorStop(0.80, "#f0783c");
-      skyGrad.addColorStop(1, "#ffd180");
-    } else if (env === "night_campfire") {
-      skyGrad.addColorStop(0, "#02040a");
-      skyGrad.addColorStop(0.38, "#071124");
-      skyGrad.addColorStop(0.75, "#111e36");
-      skyGrad.addColorStop(1, "#1e202c");
-    } else if (env === "misty_stones") {
-      skyGrad.addColorStop(0, "#14202b");
-      skyGrad.addColorStop(0.42, "#32495c");
-      skyGrad.addColorStop(0.75, "#6c8596");
-      skyGrad.addColorStop(1, "#b8cad4");
-    } else {
-      // sacred_temple (Crepúsculo Místico da Chapada)
-      skyGrad.addColorStop(0, "#060a17");
-      skyGrad.addColorStop(0.42, "#162345");
-      skyGrad.addColorStop(0.75, "#3a355c");
-      skyGrad.addColorStop(1, "#8c6968");
-    }
-    ctx.fillStyle = skyGrad;
-    ctx.fillRect(-120, -120, W + 240, H + 240);
-
-    // 2. VIA LÁCTEA, ESTRELAS E LUA CRESCENTE (Cenas Noturnas / Crepusculares)
-    if (env === "night_campfire" || env === "sacred_temple") {
-      // Faixa diagonal da Via Láctea
-      ctx.save();
-      ctx.translate(W * 0.5, H * 0.22);
-      ctx.rotate(-0.42);
-      const milkyGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, W * 0.65);
-      milkyGrad.addColorStop(0, "rgba(175, 200, 255, 0.16)");
-      milkyGrad.addColorStop(0.45, "rgba(135, 155, 220, 0.07)");
-      milkyGrad.addColorStop(1, "rgba(10, 15, 30, 0)");
-      ctx.fillStyle = milkyGrad;
-      ctx.scale(1.8, 0.38);
-      ctx.beginPath();
-      ctx.arc(0, 0, W * 0.55, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      // Estrelas cintilantes naturais
-      this.stars.forEach((s) => {
-        const twinkle = 0.35 + 0.65 * Math.sin(this.time * s.speed + s.phase);
-        ctx.fillStyle = s.color;
-        ctx.globalAlpha = twinkle;
-        ctx.beginPath();
-        ctx.arc(s.x * W, s.y * H, s.r, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.globalAlpha = 1;
-
-      // Lua Crescente Iluminada
-      const moonX = W * 0.78;
-      const moonY = H * 0.16;
-      const moonGlow = ctx.createRadialGradient(moonX, moonY, 8, moonX, moonY, 130);
-      moonGlow.addColorStop(0, "rgba(255, 250, 230, 0.35)");
-      moonGlow.addColorStop(1, "rgba(255, 250, 230, 0)");
-      ctx.fillStyle = moonGlow;
-      ctx.beginPath();
-      ctx.arc(moonX, moonY, 130, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = "#fff9e6";
-      ctx.beginPath();
-      ctx.arc(moonX, moonY, 28, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = env === "night_campfire" ? "#060e1f" : "#111b36";
-      ctx.beginPath();
-      ctx.arc(moonX - 10, moonY - 6, 25, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 3. SOL REALISTA E RAIOS CREPUSCULARES (Alvorada e Pôr do Sol)
-    if (env === "mountain_dawn" || env === "summit_sunset" || env === "misty_stones") {
-      const sunX = W * 0.52;
-      const sunY = env === "summit_sunset" ? H * 0.43 : H * 0.39;
-
-      const sunHalo = ctx.createRadialGradient(sunX, sunY, 10, sunX, sunY, W * 0.55);
-      sunHalo.addColorStop(0, "rgba(255, 250, 225, 0.95)");
-      sunHalo.addColorStop(0.15, "rgba(255, 210, 135, 0.60)");
-      sunHalo.addColorStop(0.45, "rgba(240, 140, 75, 0.22)");
-      sunHalo.addColorStop(1, "rgba(240, 140, 75, 0)");
-      ctx.fillStyle = sunHalo;
-      ctx.fillRect(-100, -100, W + 200, H + 200);
-
-      // Disco solar brilhante
-      ctx.fillStyle = "#fffdf5";
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, 46, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // 4. ÁGUIAS PLANANDO NO VALE DISTANTE
-    if (env !== "night_campfire") {
-      this.drawMountainBirds(ctx, W, H);
-    }
-
-    // 5. CORDILHEIRAS ROCHOSAS 3D FACETADAS (Com faces iluminadas e faces em sombra)
+  drawEnvironment(ctx, W, H) {
     const palettes = {
-      mountain_dawn: [
-        { base: "#24354f", lit: "#526885", shadow: "#182438" },
-        { base: "#1b283d", lit: "#3f536e", shadow: "#111b2b" },
-        { base: "#121c2b", lit: "#2c3d54", shadow: "#0b121c" }
-      ],
-      summit_sunset: [
-        { base: "#38223d", lit: "#7a4458", shadow: "#231429" },
-        { base: "#28182e", lit: "#593045", shadow: "#180d1c" },
-        { base: "#1a1021", lit: "#3d2235", shadow: "#0f0814" }
-      ],
-      night_campfire: [
-        { base: "#0d1626", lit: "#1e2f4a", shadow: "#070c17" },
-        { base: "#09101c", lit: "#162438", shadow: "#050911" },
-        { base: "#060b14", lit: "#101a29", shadow: "#03060b" }
-      ],
-      misty_stones: [
-        { base: "#364a59", lit: "#5a7587", shadow: "#253440" },
-        { base: "#283845", lit: "#455d6e", shadow: "#1a2630" },
-        { base: "#1b2730", lit: "#324554", shadow: "#111920" }
-      ],
-      sacred_temple: [
-        { base: "#1a213d", lit: "#3b436e", shadow: "#101529" },
-        { base: "#12182e", lit: "#293154", shadow: "#0b0f1f" },
-        { base: "#0c1021", lit: "#1d233d", shadow: "#070914" }
-      ]
+      mountain_dawn: {
+        skyTop: "#0b1528",
+        skyUpperMid: "#1e3557",
+        skyLowerMid: "#4d5e78",
+        skyHorizon: "#e8a568",
+        sunColor: "rgba(255, 225, 155, 0.95)",
+        sunGlow: "rgba(255, 175, 95, 0.36)",
+        sunY: 0.41,
+        m1Dark: "#1a283d",
+        m1Light: "#384d69",
+        m2Dark: "#142030",
+        m2Light: "#293c54",
+        m3Dark: "#0e1724",
+        m3Light: "#1d2c40",
+        groundTop: "#272320",
+        groundBot: "#0d0c0b",
+        mistColor: "rgba(245, 200, 155, 0.16)",
+        starsAlpha: 0.25,
+        isNight: false
+      },
+      summit_sunset: {
+        skyTop: "#120c24",
+        skyUpperMid: "#361942",
+        skyLowerMid: "#80324a",
+        skyHorizon: "#f59042",
+        sunColor: "rgba(255, 205, 120, 0.95)",
+        sunGlow: "rgba(255, 115, 55, 0.42)",
+        sunY: 0.44,
+        m1Dark: "#24132e",
+        m1Light: "#4f274a",
+        m2Dark: "#1a0e24",
+        m2Light: "#381c38",
+        m3Dark: "#11091a",
+        m3Light: "#241329",
+        groundTop: "#24181b",
+        groundBot: "#0a0708",
+        mistColor: "rgba(250, 150, 105, 0.16)",
+        starsAlpha: 0.35,
+        isNight: false
+      },
+      night_campfire: {
+        skyTop: "#03060c",
+        skyUpperMid: "#07101f",
+        skyLowerMid: "#0e1e36",
+        skyHorizon: "#182c47",
+        sunColor: "rgba(220, 235, 255, 0.9)",
+        sunGlow: "rgba(140, 185, 255, 0.16)",
+        sunY: 0.20,
+        m1Dark: "#09111f",
+        m1Light: "#14243d",
+        m2Dark: "#070d18",
+        m2Light: "#101c30",
+        m3Dark: "#050911",
+        m3Light: "#0b1424",
+        groundTop: "#1a1715",
+        groundBot: "#070606",
+        mistColor: "rgba(120, 165, 230, 0.09)",
+        starsAlpha: 0.95,
+        isNight: true
+      },
+      misty_stones: {
+        skyTop: "#16222f",
+        skyUpperMid: "#293d4f",
+        skyLowerMid: "#496478",
+        skyHorizon: "#93a8b8",
+        sunColor: "rgba(240, 248, 255, 0.75)",
+        sunGlow: "rgba(200, 225, 245, 0.28)",
+        sunY: 0.35,
+        m1Dark: "#22313f",
+        m1Light: "#3b5266",
+        m2Dark: "#192633",
+        m2Light: "#2e4254",
+        m3Dark: "#121c26",
+        m3Light: "#213140",
+        groundTop: "#24292e",
+        groundBot: "#0d1013",
+        mistColor: "rgba(220, 235, 248, 0.28)",
+        starsAlpha: 0.08,
+        isNight: false
+      },
+      sacred_temple: {
+        skyTop: "#070b17",
+        skyUpperMid: "#131d38",
+        skyLowerMid: "#23345c",
+        skyHorizon: "#876c52",
+        sunColor: "rgba(255, 225, 155, 0.85)",
+        sunGlow: "rgba(234, 197, 118, 0.30)",
+        sunY: 0.37,
+        m1Dark: "#121b30",
+        m1Light: "#28395c",
+        m2Dark: "#0c1324",
+        m2Light: "#1d2b47",
+        m3Dark: "#080d1a",
+        m3Light: "#141f36",
+        groundTop: "#1f1c24",
+        groundBot: "#09080c",
+        mistColor: "rgba(234, 197, 118, 0.14)",
+        starsAlpha: 0.80,
+        isNight: true
+      }
     };
 
-    const pal = palettes[env] || palettes.mountain_dawn;
+    const pal = palettes[this.environment] || palettes.mountain_dawn;
 
-    this.mountainRidges.forEach((ridge, idx) => {
-      const layerShift = (worldScroll * (0.15 + idx * 0.22)) % (W * 0.4);
-      this.drawFacetedMountainLayer(ctx, W, H, ridge, pal[idx], layerShift);
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.68);
+    skyGrad.addColorStop(0, pal.skyTop);
+    skyGrad.addColorStop(0.35, pal.skyUpperMid);
+    skyGrad.addColorStop(0.7, pal.skyLowerMid);
+    skyGrad.addColorStop(1, pal.skyHorizon);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H);
 
-      // Camada de neblina volumétrica entre cada cadeia de montanhas (Cloud Inversion)
-      this.drawValleyMistLayer(ctx, W, H, (0.45 + idx * 0.08) * H, idx);
-    });
+    if (pal.starsAlpha > 0.3) {
+      ctx.save();
+      ctx.translate(W * 0.5, H * 0.22);
+      ctx.rotate(-0.35);
+      const mwGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, W * 0.55);
+      mwGrad.addColorStop(0, `rgba(190, 210, 255, ${0.12 * pal.starsAlpha})`);
+      mwGrad.addColorStop(0.5, `rgba(140, 170, 235, ${0.05 * pal.starsAlpha})`);
+      mwGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = mwGrad;
+      ctx.scale(1.8, 0.42);
+      ctx.beginPath();
+      ctx.arc(0, 0, W * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
-    // 6. FLORESTA DE ALTITUDE / PINHEIROS DA SERRA EM SILHUETA
-    this.drawMountainPineForest(
+    if (pal.starsAlpha > 0) {
+      this.stars.forEach((st) => {
+        const twinkle =
+          0.35 + 0.65 * Math.sin(this.time * st.speed + st.phase);
+        ctx.fillStyle = st.color;
+        ctx.globalAlpha = pal.starsAlpha * twinkle;
+        ctx.beginPath();
+        ctx.arc(st.x * W, st.y * H, st.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1.0;
+    }
+
+    const sunX = pal.isNight ? W * 0.78 : W * 0.50;
+    const sunY = H * pal.sunY;
+
+    if (pal.isNight) {
+      const moonGlow = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, W * 0.22);
+      moonGlow.addColorStop(0, "rgba(210, 230, 255, 0.32)");
+      moonGlow.addColorStop(1, "rgba(210, 230, 255, 0)");
+      ctx.fillStyle = moonGlow;
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, W * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#eef6ff";
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 36, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = pal.skyUpperMid;
+      ctx.beginPath();
+      ctx.arc(sunX - 13, sunY - 8, 31, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      const halo = ctx.createRadialGradient(sunX, sunY, 15, sunX, sunY, W * 0.52);
+      halo.addColorStop(0, pal.sunColor);
+      halo.addColorStop(0.25, pal.sunGlow);
+      halo.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, W * 0.52, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(sunX, sunY);
+      for (let r = 0; r < 10; r++) {
+        const angle = (r / 10) * Math.PI * 2 + this.time * 0.025;
+        ctx.save();
+        ctx.rotate(angle);
+        const rayG = ctx.createLinearGradient(0, 0, W * 0.55, 0);
+        rayG.addColorStop(0, "rgba(255, 235, 185, 0.11)");
+        rayG.addColorStop(1, "rgba(255, 235, 185, 0)");
+        ctx.fillStyle = rayG;
+        ctx.beginPath();
+        ctx.moveTo(0, -14);
+        ctx.lineTo(W * 0.55, -55);
+        ctx.lineTo(W * 0.55, 55);
+        ctx.lineTo(0, 14);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    const walkShift = this.pose === "walking_trail" ? this.time * 0.015 : 0;
+
+    this.drawRealisticMountainRange(
       ctx,
       W,
       H,
-      H * 0.61,
-      env === "night_campfire" ? "#05080f" : "#0e1622",
-      worldScroll * 0.65
+      this.mountainRidges[0],
+      pal.m1Dark,
+      pal.m1Light,
+      sunX,
+      walkShift * 0.2
+    );
+    this.drawValleyMistLayer(ctx, W, H, 0.44, pal.mistColor, 1.0);
+
+    this.drawRealisticMountainRange(
+      ctx,
+      W,
+      H,
+      this.mountainRidges[1],
+      pal.m2Dark,
+      pal.m2Light,
+      sunX,
+      walkShift * 0.45
+    );
+    this.drawValleyMistLayer(ctx, W, H, 0.53, pal.mistColor, 1.3);
+
+    this.drawRealisticMountainRange(
+      ctx,
+      W,
+      H,
+      this.mountainRidges[2],
+      pal.m3Dark,
+      pal.m3Light,
+      sunX,
+      walkShift * 0.8
     );
 
-    // 7. PENHASCO ROCHOSO REALISTA EM PRIMEIRO PLANO (Laje de Quartzito da Chapada)
-    this.drawRealisticCliffLedge(ctx, W, H, env, worldScroll);
-
-    // 8. FOGUEIRA REALISTA (Se ambiente noturno ou pose de vigília no fogo)
-    if (env === "night_campfire" || this.pose === "campfire_circle") {
-      this.drawRealisticCampfire(ctx, W * 0.27, H * 0.685, W);
-    }
+    this.drawDistantPineForest(ctx, W, H, H * 0.64, pal.m3Dark, walkShift);
+    this.drawRockyMountainPlateau(ctx, W, H, pal, walkShift);
   }
 
-  drawFacetedMountainLayer(ctx, W, H, ridge, colors, shiftX) {
-    const spanW = W + 360;
-    const startX = -180 - shiftX;
+  drawRealisticMountainRange(ctx, W, H, pts, darkColor, lightColor, lightX, scrollOffset) {
+    const baseY = H * 0.70;
 
-    // Silhueta principal da cordilheira
-    ctx.fillStyle = colors.base;
+    ctx.fillStyle = darkColor;
     ctx.beginPath();
-    ctx.moveTo(startX, H);
-    ridge.forEach((pt) => {
-      ctx.lineTo(startX + pt.t * spanW, pt.yRatio * H);
-    });
-    ctx.lineTo(startX + spanW, H);
+    ctx.moveTo(0, H);
+    for (let i = 0; i < pts.length; i++) {
+      const px = i * (W / (pts.length - 1));
+      const py = pts[i].y * H;
+      ctx.lineTo(px, py);
+    }
+    ctx.lineTo(W, H);
     ctx.closePath();
     ctx.fill();
 
-    // Facetas 3D de Rocha (Lado esquerdo iluminado pelo sol/lua, lado direito em sombra)
-    for (let i = 1; i < ridge.length - 1; i++) {
-      const prev = ridge[i - 1];
-      const curr = ridge[i];
-      const next = ridge[i + 1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const x1 = i * (W / (pts.length - 1));
+      const y1 = pts[i].y * H;
+      const x2 = (i + 1) * (W / (pts.length - 1));
+      const y2 = pts[i + 1].y * H;
 
-      // Se é um pico local
-      if (curr.yRatio < prev.yRatio && curr.yRatio < next.yRatio) {
-        const px = startX + curr.t * spanW;
-        const py = curr.yRatio * H;
-        const leftX = startX + prev.t * spanW;
-        const leftY = prev.yRatio * H;
-        const rightX = startX + next.t * spanW;
-        const rightY = next.yRatio * H;
-        const ridgeMidX = px + (rightX - leftX) * 0.08;
-        const ridgeBottomY = Math.max(leftY, rightY) + curr.ridgeDrop * H * 2.2;
+      const isPeak = y1 < y2;
+      const ridgeBottomX = (x1 + x2) * 0.5 + pts[i].ridgeXOffset * W;
 
-        // Face iluminada
-        ctx.fillStyle = colors.lit;
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(leftX, leftY);
-        ctx.lineTo(ridgeMidX, ridgeBottomY);
-        ctx.closePath();
-        ctx.fill();
-
-        // Face em sombra
-        ctx.fillStyle = colors.shadow;
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(rightX, rightY);
-        ctx.lineTo(ridgeMidX, ridgeBottomY);
-        ctx.closePath();
-        ctx.fill();
-      }
+      ctx.fillStyle = isPeak ? darkColor : lightColor;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(ridgeBottomX, baseY);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
-  drawValleyMistLayer(ctx, W, H, yPos, layerIdx) {
-    const mistGrad = ctx.createLinearGradient(0, yPos - 45, 0, yPos + 55);
-    mistGrad.addColorStop(0, "rgba(255, 255, 255, 0)");
-    mistGrad.addColorStop(
-      0.5,
-      this.environment === "misty_stones"
-        ? "rgba(215, 228, 238, 0.32)"
-        : this.environment === "night_campfire"
-        ? "rgba(35, 50, 75, 0.22)"
-        : "rgba(255, 235, 205, 0.16)"
-    );
-    mistGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = mistGrad;
-    ctx.fillRect(-120, yPos - 45, W + 240, 100);
-
-    // Nuvens volumétricas deslizando pelo vale
+  drawValleyMistLayer(ctx, W, H, yFactor, mistColor, speedMult) {
+    ctx.save();
     this.clouds.forEach((c, idx) => {
-      if (idx % 3 !== layerIdx) return;
-      c.x += c.speed * 0.016;
-      if (c.x > 1.35) c.x = -0.35;
-      if (c.x < -0.35) c.x = 1.35;
-
-      const cx = c.x * W;
-      const cy = yPos + (idx % 2 === 0 ? -12 : 12);
+      const cx = ((c.x + this.time * c.speed * speedMult) % 1.5) - 0.25;
+      const cy = (yFactor + (idx % 3) * 0.025) * H;
       const cw = c.w * W;
       const ch = c.h * H;
 
-      const cg = ctx.createRadialGradient(cx, cy, 5, cx, cy, cw * 0.55);
-      cg.addColorStop(0, "rgba(255, 248, 238, 0.18)");
-      cg.addColorStop(1, "rgba(255, 248, 238, 0)");
-      ctx.fillStyle = cg;
+      const grad = ctx.createRadialGradient(cx * W, cy, ch * 0.1, cx * W, cy, cw * 0.6);
+      grad.addColorStop(0, mistColor);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.ellipse(cx, cy, cw * 0.55, ch, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx * W, cy, cw * 0.6, ch, 0, 0, Math.PI * 2);
       ctx.fill();
     });
+    ctx.restore();
   }
 
-  drawMountainPineForest(ctx, W, H, baseY, treeColor, scrollX) {
+  drawDistantPineForest(ctx, W, H, horizonY, treeColor, walkShift) {
+    ctx.save();
     ctx.fillStyle = treeColor;
-    const totalTrees = 38;
-    const span = W + 300;
-    for (let i = 0; i < totalTrees; i++) {
-      let tx = ((i * 47 - scrollX) % span);
-      if (tx < 0) tx += span;
-      tx -= 150;
+    const treeCount = 34;
+    for (let i = 0; i < treeCount; i++) {
+      const rawX = ((i / treeCount) - (walkShift * 0.5) % 1 + 1) % 1;
+      const tx = rawX * W;
+      const th = 22 + ((i * 17) % 24);
+      const tw = th * 0.42;
+      const ty = horizonY + ((i * 13) % 16);
 
-      const treeH = 28 + (i % 5) * 11;
-      const ty = baseY + Math.sin(i * 1.3) * 14;
-
-      // 3 níveis de copa de pinheiro/árvore de altitude
-      for (let tier = 0; tier < 3; tier++) {
-        const tierY = ty - treeH + tier * (treeH * 0.32);
-        const tierW = 10 + tier * 6;
+      for (let layer = 0; layer < 3; layer++) {
+        const ly = ty - layer * (th * 0.28);
+        const lw = tw * (1 - layer * 0.22);
         ctx.beginPath();
-        ctx.moveTo(tx, tierY - 12);
-        ctx.lineTo(tx - tierW, tierY + 8);
-        ctx.lineTo(tx + tierW, tierY + 8);
+        ctx.moveTo(tx, ly - th * 0.45);
+        ctx.lineTo(tx - lw, ly);
+        ctx.lineTo(tx + lw, ly);
         ctx.closePath();
         ctx.fill();
       }
     }
-  }
-
-  drawRealisticCliffLedge(ctx, W, H, env, scrollX) {
-    const floorY = H * 0.665;
-    const isNight = env === "night_campfire";
-
-    // Massa rochosa principal do penhasco
-    const rockGrad = ctx.createLinearGradient(0, floorY - 30, 0, H);
-    rockGrad.addColorStop(0, isNight ? "#221e21" : "#3a4452");
-    rockGrad.addColorStop(0.25, isNight ? "#161417" : "#252d38");
-    rockGrad.addColorStop(1, "#090c12");
-
-    ctx.fillStyle = rockGrad;
-    ctx.beginPath();
-    ctx.moveTo(-120, floorY + 28);
-    ctx.lineTo(W * 0.18, floorY - 8);
-    ctx.lineTo(W * 0.45, floorY - 22);
-    ctx.lineTo(W * 0.76, floorY - 14);
-    ctx.lineTo(W + 120, floorY + 18);
-    ctx.lineTo(W + 120, H + 120);
-    ctx.lineTo(-120, H + 120);
-    ctx.closePath();
-    ctx.fill();
-
-    // Lajes facetadas de pedra sobre o mirante (com borda iluminada pelo sol ou fogueira)
-    ctx.fillStyle = isNight ? "#2e2624" : "#4b5869";
-    ctx.beginPath();
-    ctx.moveTo(W * 0.28, floorY + 6);
-    ctx.lineTo(W * 0.40, floorY - 46);
-    ctx.lineTo(W * 0.65, floorY - 40);
-    ctx.lineTo(W * 0.74, floorY + 12);
-    ctx.closePath();
-    ctx.fill();
-
-    // Borda superior iluminada da rocha (Rim-Light natural)
-    ctx.strokeStyle = isNight ? "rgba(255, 150, 65, 0.38)" : "rgba(255, 232, 185, 0.42)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(W * 0.18, floorY - 8);
-    ctx.lineTo(W * 0.40, floorY - 46);
-    ctx.lineTo(W * 0.65, floorY - 40);
-    ctx.lineTo(W * 0.76, floorY - 14);
-    ctx.stroke();
-
-    // Fissuras geológicas na rocha
-    ctx.strokeStyle = "rgba(10, 14, 20, 0.55)";
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.moveTo(W * 0.40, floorY - 46);
-    ctx.lineTo(W * 0.48, floorY + 14);
-    ctx.moveTo(W * 0.60, floorY - 41);
-    ctx.lineTo(W * 0.55, floorY + 8);
-    ctx.stroke();
+    ctx.restore();
   }
 
   /**
-   * FOGUEIRA REALISTA NA MONTANHA (Toras em brasa, pedras, múltiplas chamas orgânicas e fumaça)
+   * Platô rochoso da Serra com mureta de pedras e cascalho de quartzo branco (fiel a ref_montanha_1 e ref_montanha_4)
    */
-  drawRealisticCampfire(ctx, x, y, W) {
-    // 1. Reflexo quente alaranjado no chão de pedra ao redor da fogueira
-    const groundGlow = ctx.createRadialGradient(x, y - 10, 8, x, y - 10, W * 0.44);
-    groundGlow.addColorStop(0, "rgba(255, 130, 30, 0.55)");
-    groundGlow.addColorStop(0.45, "rgba(255, 80, 15, 0.18)");
-    groundGlow.addColorStop(1, "rgba(255, 60, 0, 0)");
-    ctx.fillStyle = groundGlow;
+  drawRockyMountainPlateau(ctx, W, H, pal, walkShift) {
+    const floorY = H * 0.665;
+
+    const gGrad = ctx.createLinearGradient(0, floorY, 0, H);
+    gGrad.addColorStop(0, pal.groundTop);
+    gGrad.addColorStop(1, pal.groundBot);
+
+    ctx.fillStyle = gGrad;
     ctx.beginPath();
-    ctx.arc(x, y - 10, W * 0.44, 0, Math.PI * 2);
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, floorY + 14);
+    ctx.quadraticCurveTo(W * 0.30, floorY - 12, W * 0.62, floorY + 4);
+    ctx.quadraticCurveTo(W * 0.85, floorY + 14, W, floorY - 4);
+    ctx.lineTo(W, H);
+    ctx.closePath();
     ctx.fill();
 
-    // 2. Fumaça suave subindo na noite
-    for (let s = 0; s < 4; s++) {
-      const smokeProgress = (this.time * 0.4 + s * 0.25) % 1;
-      const sx = x + Math.sin(this.time * 1.5 + s) * 22 * smokeProgress;
-      const sy = y - 85 - smokeProgress * 140;
-      const sr = 18 + smokeProgress * 38;
-      const sAlpha = (1 - smokeProgress) * 0.12;
-      ctx.fillStyle = `rgba(180, 190, 210, ${sAlpha})`;
+    // Grande afloramento rochoso de quartzito da Chapada/Serra ao fundo do platô (como em ref_montanha_4.jpg)
+    ctx.save();
+    const scrollPx = this.pose === "walking_trail" ? (walkShift * W * 1.6) % W : 0;
+    const boulderGrad = ctx.createLinearGradient(0, floorY - 95, 0, floorY + 25);
+    boulderGrad.addColorStop(0, pal.isNight ? "#1c2430" : "#4a433f");
+    boulderGrad.addColorStop(1, pal.isNight ? "#0d1118" : "#262220");
+    ctx.fillStyle = boulderGrad;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.36 - scrollPx * 0.25, floorY + 12);
+    ctx.lineTo(W * 0.41 - scrollPx * 0.25, floorY - 62);
+    ctx.lineTo(W * 0.55 - scrollPx * 0.25, floorY - 78);
+    ctx.lineTo(W * 0.72 - scrollPx * 0.25, floorY - 64);
+    ctx.lineTo(W * 0.81 - scrollPx * 0.25, floorY + 14);
+    ctx.closePath();
+    ctx.fill();
+
+    // Mureta rústica de pedras empilhadas da montanha
+    const wallStones = 11;
+    for (let s = 0; s < wallStones; s++) {
+      const sx = W * 0.22 + s * (W * 0.058) - (scrollPx * 0.35 % 60);
+      const sy = floorY + 8 + (s % 2) * 5;
+      ctx.fillStyle = s % 2 === 0
+        ? (pal.isNight ? "#1a202c" : "#524b46")
+        : (pal.isNight ? "#141923" : "#3d3733");
+      ctx.strokeStyle = "rgba(0,0,0,0.45)";
+      ctx.lineWidth = 1.8;
+      this.roundRect(ctx, sx, sy - 18, 56, 24, 8, true, true);
+    }
+
+    // Pedrinhas brancas de quartzo espalhadas no solo da serra (marca registrada das fotos de referência!)
+    const isFire = this.environment === "night_campfire" || this.pose === "campfire_circle";
+    this.quartzPebbles.forEach((p) => {
+      let px = p.x * W - (this.pose === "walking_trail" ? (this.time * 95) % W : 0);
+      if (px < -20) px += W + 40;
+      const py = floorY + 16 + p.yOffset;
+
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(p.rot);
+      if (isFire && px < W * 0.58 && py < floorY + 120) {
+        // Reflexo alaranjado da fogueira nas pedras de quartzo branco
+        ctx.fillStyle = `rgba(235, 185, 145, ${0.42 * p.shade})`;
+      } else if (pal.isNight) {
+        ctx.fillStyle = `rgba(165, 180, 205, ${0.32 * p.shade})`;
+      } else {
+        ctx.fillStyle = `rgba(225, 222, 215, ${0.48 * p.shade})`;
+      }
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.rx, p.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+
+  drawSacredGeometry(ctx, W, H) {
+    const cx = W * 0.5;
+    const cy = H * 0.26;
+    const r = Math.min(W, H) * 0.14;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(this.time * 0.05);
+    ctx.strokeStyle = "rgba(234, 197, 118, 0.16)";
+    ctx.lineWidth = 1.6;
+
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (this.sacredOverlay === "ocidemnte_seal") {
+      for (let t = 0; t < 2; t++) {
+        ctx.beginPath();
+        for (let i = 0; i < 3; i++) {
+          const ang = (i * 2 * Math.PI) / 3 - Math.PI / 2 + t * Math.PI;
+          const x = Math.cos(ang) * r * 0.82;
+          const y = Math.sin(ang) * r * 0.82;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    } else if (this.sacredOverlay === "tatwas_5") {
+      for (let i = 0; i < 5; i++) {
+        const ang = (i * 2 * Math.PI) / 5 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * r * 0.48, Math.sin(ang) * r * 0.48, r * 0.16, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawCampfire(ctx, x, y, W, H) {
+    ctx.save();
+
+    const groundGlow = ctx.createRadialGradient(x, y + 10, 8, x, y + 10, 290);
+    groundGlow.addColorStop(0, "rgba(255, 130, 30, 0.52)");
+    groundGlow.addColorStop(0.45, "rgba(255, 80, 15, 0.20)");
+    groundGlow.addColorStop(1, "rgba(255, 50, 0, 0)");
+    ctx.fillStyle = groundGlow;
+    ctx.beginPath();
+    ctx.ellipse(x, y + 18, 290, 90, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Fumaça azulada subindo na noite da montanha (fiel a ref_montanha_1.jpg)
+    for (let s = 0; s < 5; s++) {
+      const smokeProgress = ((this.time * 0.32 + s * 0.2) % 1);
+      const sy = y - 65 - smokeProgress * 220;
+      const sx = x + Math.sin(this.time * 1.4 + s) * (16 + smokeProgress * 32);
+      const sr = 20 + smokeProgress * 55;
+      const sa = (1 - smokeProgress) * 0.14;
+      const sGrad = ctx.createRadialGradient(sx, sy, 2, sx, sy, sr);
+      sGrad.addColorStop(0, `rgba(145, 175, 220, ${sa})`);
+      sGrad.addColorStop(1, "rgba(145, 175, 220, 0)");
+      ctx.fillStyle = sGrad;
       ctx.beginPath();
       ctx.arc(sx, sy, sr, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // 3. Toras de madeira cruzadas com brasas incandescentes
+    // Toras de lenha e brasas vivas
     ctx.save();
     ctx.translate(x, y);
-    ctx.fillStyle = "#2b1810";
-    ctx.strokeStyle = "#ff6d00";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = "#29160c";
+    ctx.lineCap = "round";
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.moveTo(-55, 12);
+    ctx.lineTo(48, -8);
+    ctx.moveTo(52, 14);
+    ctx.lineTo(-46, -8);
+    ctx.stroke();
 
-    ctx.rotate(-0.22);
-    this.roundRect(ctx, -56, -9, 112, 18, 6, true, true);
-    ctx.rotate(0.44);
-    this.roundRect(ctx, -56, -9, 112, 18, 6, true, true);
-    ctx.restore();
+    const emberPulse = 0.7 + 0.3 * Math.sin(this.time * 7.5);
+    ctx.fillStyle = `rgba(255, 95, 15, ${emberPulse})`;
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 40, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // 4. Línguas de Fogo Orgânicas (Camadas Vermelha, Laranja, Amarela e Núcleo Branco)
     const flameLayers = [
-      { w: 44, h: 105, color: "rgba(230, 55, 15, 0.85)", speed: 6.5 },
-      { w: 34, h: 86, color: "rgba(255, 125, 20, 0.90)", speed: 8.2 },
-      { w: 24, h: 64, color: "rgba(255, 205, 45, 0.92)", speed: 10.4 },
-      { w: 13, h: 38, color: "rgba(255, 250, 210, 0.95)", speed: 12.0 }
+      { color: "rgba(255, 65, 10, 0.85)", w: 46, h: 108, speed: 6.5, phase: 0 },
+      { color: "rgba(255, 135, 20, 0.90)", w: 35, h: 88, speed: 8.2, phase: 1.4 },
+      { color: "rgba(255, 205, 55, 0.92)", w: 23, h: 66, speed: 10.4, phase: 2.7 },
+      { color: "rgba(255, 248, 200, 0.95)", w: 12, h: 42, speed: 12.0, phase: 4.1 }
     ];
 
-    flameLayers.forEach((fl, idx) => {
-      const sway1 = Math.sin(this.time * fl.speed + idx) * 14;
-      const sway2 = Math.cos(this.time * (fl.speed * 0.8) - idx) * 10;
-      const dynamicH = fl.h + Math.sin(this.time * 11 + idx) * 12;
+    flameLayers.forEach((fl) => {
+      const sway1 = Math.sin(this.time * fl.speed + fl.phase) * 14;
+      const sway2 = Math.cos(this.time * (fl.speed * 0.8) + fl.phase) * 9;
+      const fh = fl.h + Math.sin(this.time * fl.speed * 1.3) * 12;
 
       ctx.fillStyle = fl.color;
       ctx.beginPath();
-      ctx.moveTo(x - fl.w, y + 2);
+      ctx.moveTo(-fl.w, 6);
       ctx.bezierCurveTo(
-        x - fl.w * 0.8 + sway1,
-        y - dynamicH * 0.45,
-        x - fl.w * 0.2 + sway2,
-        y - dynamicH * 0.85,
-        x + sway1 * 0.6,
-        y - dynamicH
+        -fl.w * 0.8 + sway2,
+        -fh * 0.4,
+        sway1 - fl.w * 0.2,
+        -fh * 0.75,
+        sway1 * 0.7,
+        -fh
       );
       ctx.bezierCurveTo(
-        x + fl.w * 0.2 + sway2,
-        y - dynamicH * 0.85,
-        x + fl.w * 0.8 + sway1,
-        y - dynamicH * 0.45,
-        x + fl.w,
-        y + 2
+        sway1 + fl.w * 0.2,
+        -fh * 0.75,
+        fl.w * 0.8 + sway2,
+        -fh * 0.4,
+        fl.w,
+        6
       );
       ctx.closePath();
       ctx.fill();
     });
+    ctx.restore();
 
-    // 5. Círculo de pedras do acampamento ao redor da base da fogueira
-    const stonePositions = [-52, -32, -10, 14, 36, 54];
-    stonePositions.forEach((sx, i) => {
-      ctx.fillStyle = i % 2 === 0 ? "#3d3532" : "#2b2523";
+    // Círculo de pedras da fogueira (fiel a ref_montanha_4.jpg)
+    const stones = [
+      { dx: -64, dy: 12, rx: 19, ry: 12 },
+      { dx: -40, dy: 20, rx: 21, ry: 13 },
+      { dx: -12, dy: 24, rx: 23, ry: 14 },
+      { dx: 18, dy: 23, rx: 22, ry: 13 },
+      { dx: 46, dy: 19, rx: 20, ry: 12 },
+      { dx: 66, dy: 11, rx: 18, ry: 11 }
+    ];
+    stones.forEach((st) => {
+      const sGrad = ctx.createRadialGradient(
+        x + st.dx * 0.7,
+        y + st.dy - 6,
+        2,
+        x + st.dx,
+        y + st.dy,
+        st.rx
+      );
+      sGrad.addColorStop(0, "#75462d");
+      sGrad.addColorStop(1, "#211815");
+      ctx.fillStyle = sGrad;
       ctx.beginPath();
-      ctx.ellipse(x + sx, y + 8 + (i % 2) * 3, 14, 9, 0, 0, Math.PI * 2);
+      ctx.ellipse(x + st.dx, y + st.dy, st.rx, st.ry, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Brilho alaranjado do fogo no topo da pedra
-      ctx.strokeStyle = "rgba(255, 140, 40, 0.6)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(x + sx, y + 6, 10, Math.PI * 1.1, Math.PI * 1.9);
-      ctx.stroke();
     });
-  }
-
-  /**
-   * Halo Sagrado Sutil integrado como fenômeno óptico/atmosférico natural no céu
-   */
-  drawAtmosphericSacredHalo(ctx, W, H) {
-    if (this.sacredOverlay === "none") return;
-
-    const centerX = W * 0.52;
-    const centerY = H * 0.34;
-    const radius = Math.min(W, H) * 0.17;
-
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.globalAlpha = 0.22; // Sutil como constelação / halo solar para não parecer artificial
-
-    ctx.strokeStyle = "#ffe6a3";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-    ctx.stroke();
-
-    const triR = radius * 0.86;
-    ctx.beginPath();
-    ctx.moveTo(0, -triR);
-    ctx.lineTo(triR * 0.866, triR * 0.5);
-    ctx.lineTo(-triR * 0.866, triR * 0.5);
-    ctx.closePath();
-    ctx.stroke();
 
     ctx.restore();
   }
 
-  /**
-   * PERSONAGEM ILUSTRADO CINEMATOGRÁFICO ("O SÁBIO DA MONTANHA")
-   * Proporções anatômicas reais, sombreamento volumétrico, dobras de jaqueta corta-vento branca,
-   * iluminação de contorno (rim-light) do sol/fogueira e movimentos orgânicos suaves.
-   */
-  drawCinematicMountainSage(ctx, W, H) {
-    const isWalking = this.pose === "walking_trail";
-    const walkPhase = this.time * 3.1; // Cadência calma e natural de caminhada na trilha
-    const walkBobY = isWalking ? Math.abs(Math.sin(walkPhase)) * 5.5 : 0;
+  /* =========================================================================
+   * 6. PERSONAGEM REMODELADO V5 (ILUSTRAÇÃO CINEMATOGRÁFICA FIEL ÀS FOTOS REAIS)
+   * ========================================================================= */
+  drawCharacterV5(ctx, W, H, hasCampfire) {
+    const isSquare = this.currentFormat === "feed_square";
+    const scale = isSquare ? 0.88 : 1.05;
 
-    const cx = W * 0.54;
-    const groundY = H * 0.645 - walkBobY;
-    const scale = (Math.min(W, H) / 1080) * 0.96;
+    let charX = W * 0.52;
+    if (hasCampfire) {
+      charX = W * 0.64;
+    } else if (this.pose === "walking_trail") {
+      charX = W * 0.48 + Math.sin(this.time * 0.8) * 14;
+    }
 
-    // Respiração orgânica suave
-    const breath = Math.sin(this.time * 1.6);
-    const breathY = breath * 3.2;
-
-    this.blinkTimer += 0.016;
-    const isBlinking = this.blinkTimer % 4.5 > 4.34;
-
-    const isNightFire =
-      this.environment === "night_campfire" || this.pose === "campfire_circle";
-    const rimLightColor = isNightFire
-      ? "rgba(255, 155, 60, 0.85)"
-      : "rgba(255, 238, 185, 0.85)";
-
-    ctx.save();
-    ctx.translate(cx, groundY);
-    ctx.scale(scale, scale);
-
-    // Sombra projetada realista sobre a laje de pedra
-    ctx.fillStyle = "rgba(5, 8, 14, 0.55)";
-    ctx.beginPath();
-    ctx.ellipse(0, 4, 78, 16, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    const isSeated =
+    const groundY = H * 0.678;
+    const isSitting =
       this.pose === "seated_thinker" ||
       this.pose === "seated_staff" ||
       this.pose === "campfire_circle";
 
-    const hipY = isSeated ? -142 : -255;
-    const shoulderY = hipY - 178 + breathY;
+    const breathe = Math.sin(this.time * 2.1) * 2.5;
+    const wind = Math.sin(this.time * 2.8) * 6 + Math.cos(this.time * 4.3) * 2.5;
+    const isBlinking = this.blinkTimer % 4.6 > 4.44;
+    if (this.blinkTimer > 4.6) this.blinkTimer = 0;
 
-    // 1. MOCHILA DE EXPEDIÇÃO PRETA + ISOLANTE TÉRMICO AZUL (Com volume e iluminação)
+    // Direção do olhar: nas cenas de fogueira ou seated_thinker olha para a esquerda (-1), nas demais olha para a esquerda/horizonte (-1) ou direita (1)
+    const facing = hasCampfire ? -1 : this.pose === "walking_trail" ? -1 : -1;
+
     ctx.save();
-    ctx.translate(-34, shoulderY + 6);
-    const packGrad = ctx.createLinearGradient(-52, 0, 18, 155);
-    packGrad.addColorStop(0, "#272c35");
-    packGrad.addColorStop(1, "#12151a");
-    ctx.fillStyle = packGrad;
-    ctx.strokeStyle = "#38404d";
-    ctx.lineWidth = 2.5;
-    this.roundRect(ctx, -48, 0, 68, 158, 18, true, true);
+    ctx.translate(charX, groundY);
+    ctx.scale(scale, scale);
 
-    // Isolante térmico azul enrolado no topo da mochila
-    const matGrad = ctx.createLinearGradient(-52, -30, 18, 0);
-    matGrad.addColorStop(0, "#3488c4");
-    matGrad.addColorStop(1, "#1b5580");
-    ctx.fillStyle = matGrad;
-    ctx.strokeStyle = "#143e5e";
-    this.roundRect(ctx, -52, -28, 70, 32, 14, true, true);
-
-    ctx.fillStyle = "#123a57";
+    // Sombra projetada realista no solo de pedras
+    ctx.fillStyle = "rgba(4, 7, 12, 0.55)";
     ctx.beginPath();
-    ctx.arc(-38, -12, 11, 0, Math.PI * 2);
+    ctx.ellipse(0, 8, isSitting ? 95 : 75, 18, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
 
-    // 2. CALÇA DE TRILHA BRANCA COM ARTICULAÇÃO ANATÔMICA DE JOELHO E BOTAS DE MONTANHA
-    if (isWalking) {
-      // Ciclo biomecânico de caminhada em 3/4 perfil
-      const legA = Math.sin(walkPhase);
-      const legB = Math.sin(walkPhase + Math.PI);
+    // Pedra de assento da montanha nas poses sentadas (fiel a ref_whatsapp_2 e ref_whatsapp_3)
+    if (isSitting) {
+      const rockGrad = ctx.createLinearGradient(-85, -95, 85, 12);
+      rockGrad.addColorStop(0, hasCampfire ? "#4d3629" : "#4b4946");
+      rockGrad.addColorStop(0.5, "#33312e");
+      rockGrad.addColorStop(1, "#1a1918");
+      ctx.fillStyle = rockGrad;
+      ctx.strokeStyle = "#141312";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-88, 8);
+      ctx.lineTo(-76, -68);
+      ctx.quadraticCurveTo(-20, -84, 52, -72);
+      ctx.lineTo(84, -36);
+      ctx.lineTo(92, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
 
-      // Perna de trás (esquerda)
-      const kneeAX = -10 + legA * 22;
-      const kneeAY = hipY + 115 - Math.max(0, legA) * 12;
-      const footAX = -12 + legA * 38;
-      const footAY = -16 - Math.max(0, -legA) * 14;
-      this.drawAnatomicalLeg(ctx, -14, hipY, kneeAX, kneeAY, footAX, footAY, "#dde3ec", "#b8c2d1");
-      this.drawTrekkingBoot(ctx, footAX, footAY);
-
-      // Perna da frente (direita)
-      const kneeBX = 12 + legB * 22;
-      const kneeBY = hipY + 115 - Math.max(0, legB) * 12;
-      const footBX = 14 + legB * 38;
-      const footBY = -16 - Math.max(0, -legB) * 14;
-      this.drawAnatomicalLeg(ctx, 14, hipY, kneeBX, kneeBY, footBX, footBY, "#f5f7fa", "#ccd4e0");
-      this.drawTrekkingBoot(ctx, footBX, footBY);
-    } else if (!isSeated) {
-      // Postura firme no mirante da montanha
-      this.drawAnatomicalLeg(ctx, -22, hipY, -30, hipY + 120, -34, -16, "#e4e9f0", "#bcc6d4");
-      this.drawTrekkingBoot(ctx, -34, -16);
-
-      this.drawAnatomicalLeg(ctx, 22, hipY, 28, hipY + 120, 32, -16, "#f8fafc", "#cfd7e3");
-      this.drawTrekkingBoot(ctx, 32, -16);
-    } else {
-      // Sentado naturalmente sobre a rocha do mirante
-      this.drawAnatomicalLeg(ctx, -18, hipY, -70, hipY + 32, -52, -18, "#e2e7f0", "#bcc6d4");
-      this.drawTrekkingBoot(ctx, -52, -18);
-
-      this.drawAnatomicalLeg(ctx, 18, hipY, 72, hipY + 26, 58, -18, "#f8fafc", "#cfd7e3");
-      this.drawTrekkingBoot(ctx, 58, -18);
+      // Textura de líquen/musgo da serra na pedra
+      ctx.fillStyle = "rgba(120, 145, 115, 0.25)";
+      ctx.beginPath();
+      ctx.ellipse(-25, -55, 24, 8, -0.2, 0, Math.PI * 2);
+      ctx.ellipse(35, -42, 18, 6, 0.3, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // 3. TORSO ESTRUTURADO — JAQUETA CORTA-VENTO BRANCA COM SOMBREAMENTO VOLUMÉTRICO E RIM-LIGHT
-    const windBreeze = Math.sin(this.time * 2.4) * 4.5;
-    const jacketGrad = ctx.createLinearGradient(-55, shoulderY, 55, hipY);
-    jacketGrad.addColorStop(0, "#ffffff");
-    jacketGrad.addColorStop(0.65, "#f0f4f8");
-    jacketGrad.addColorStop(1, "#d5dde8");
+    ctx.scale(facing, 1);
 
-    ctx.fillStyle = jacketGrad;
-    ctx.strokeStyle = "#c2ccd9";
-    ctx.lineWidth = 2.5;
+    // Neste sistema de coordenadas (facing = -1 espelha horizontalmente):
+    // +X aponta para a FRENTE do personagem (direção do olhar)!
+    // -X aponta para as COSTAS do personagem (onde fica a mochila)!
+
+    const hipY = isSitting ? -82 : -158;
+    const walkCycle = this.pose === "walking_trail" ? this.time * 4.4 : 0;
+    const walkBob = this.pose === "walking_trail" ? Math.abs(Math.sin(walkCycle)) * 7 : 0;
+    const torsoY = hipY - 122 - walkBob + breathe;
+
+    // 1. MOCHILA DE EXPEDIÇÃO PRETA COM ISOLANTE TÉRMICO AZUL NO TOPO (Fiel a ref_whatsapp_1.jpeg)
+    this.drawExpeditionBackpack(ctx, -28, torsoY + 8, isSitting);
+
+    // 2. PERNAS COM CALÇA BRANCA FOLGADA DE MONTANHA E BOTAS DE TRILHA
+    if (isSitting) {
+      this.drawSeatedLegsV5(ctx, hipY, hasCampfire);
+    } else if (this.pose === "walking_trail") {
+      this.drawWalkingLegsV5(ctx, hipY - walkBob, walkCycle, hasCampfire);
+    } else {
+      this.drawStandingLegsV5(ctx, hipY, hasCampfire);
+    }
+
+    // 3. BRAÇO TRASEIRO (Esquerdo na perspectiva 3/4)
+    if (this.pose === "seated_thinker") {
+      // Mão apoiada no joelho (como em ref_whatsapp_2.jpeg)
+      this.drawSculptedArm(ctx, 18, torsoY + 26, 48, torsoY + 82, 68, hipY + 12, false, hasCampfire);
+    } else if (this.pose === "raising_staff") {
+      this.drawSculptedArm(ctx, 16, torsoY + 24, 58, torsoY - 15, 86, torsoY - 58, true, hasCampfire);
+      this.drawNaturalWoodStaff(ctx, 88, torsoY - 185, 82, 8, true);
+    } else if (this.pose === "teaching_gesture") {
+      const gestureWave = Math.sin(this.time * 2.4) * 6;
+      this.drawSculptedArm(ctx, 18, torsoY + 24, 56, torsoY + 42, 88, torsoY + 10 + gestureWave, true, hasCampfire);
+    } else {
+      // Braço da frente segurando o longo cajado de madeira avermelhada (fiel a ref_whatsapp_1.jpeg)
+      const staffSwing = this.pose === "walking_trail" ? Math.sin(walkCycle) * 16 : 0;
+      const handX = 76 + staffSwing * 0.6;
+      const handY = torsoY + 62 + Math.abs(staffSwing) * 0.2;
+      this.drawNaturalWoodStaff(
+        ctx,
+        handX + 4,
+        torsoY - 115,
+        handX - 6 + staffSwing * 0.5,
+        8,
+        false
+      );
+      this.drawSculptedArm(ctx, 16, torsoY + 24, 46, torsoY + 66, handX, handY, true, hasCampfire);
+    }
+
+    // 4. TRONCO: JAQUETA BRANCA DE MONTANHA COM DOBRAS E ALÇAS PRETAS DA MOCHILA (Fiel a ref_whatsapp_1.jpeg)
+    this.drawSculptedTorsoV5(ctx, torsoY, hipY - walkBob, isSitting, hasCampfire);
+
+    // 5. CABEÇA EM PERFIL 3/4 CONTEMPLATIVO + ÓCULOS + CHAPÉU COM PANO DE NUCA OU GORRO BRANCO
+    const headTilt = this.pose === "seated_thinker" || this.pose === "seated_staff" ? 0.08 : -0.04;
+    this.drawSculptedHeadV5(ctx, 6, torsoY - 26, headTilt, isBlinking, wind, hasCampfire);
+
+    // 6. BRAÇO DO PRIMEIRO PLANO (Sobreposto ao tronco)
+    if (this.pose === "seated_thinker") {
+      // Pose clássica de ref_whatsapp_2.jpeg: cotovelo apoiado na perna e mão no queixo em reflexão!
+      this.drawThinkingArmV5(ctx, -6, torsoY + 28, 38, torsoY + 96, 30, torsoY - 4, hasCampfire);
+    } else if (this.pose === "seated_staff") {
+      // Pose clássica de ref_whatsapp_3.jpeg: cajado longo inclinado na diagonal e mão próxima ao queixo
+      this.drawNaturalWoodStaff(ctx, 56, torsoY - 110, 92, 8, false);
+      this.drawThinkingArmV5(ctx, -8, torsoY + 28, 28, torsoY + 86, 44, torsoY + 8, hasCampfire);
+    } else if (this.pose === "walking_trail") {
+      const backSwing = -Math.sin(walkCycle) * 20;
+      this.drawSculptedArm(
+        ctx,
+        -12,
+        torsoY + 28,
+        -18 + backSwing * 0.5,
+        torsoY + 82,
+        -4 + backSwing,
+        torsoY + 132,
+        true,
+        hasCampfire
+      );
+    } else {
+      // Braço relaxado com a luva longa de raspa (como em ref_whatsapp_1.jpeg)
+      this.drawSculptedArm(
+        ctx,
+        -12,
+        torsoY + 28,
+        -16,
+        torsoY + 84,
+        -6,
+        torsoY + 138,
+        true,
+        hasCampfire
+      );
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * Mochila de expedição preta com isolante térmico azul enrolado no topo e garrafa lateral (fiel a ref_whatsapp_1.jpeg)
+   */
+  drawExpeditionBackpack(ctx, x, y, isSitting) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (isSitting) ctx.rotate(-0.06);
+
+    // Corpo principal da mochila preta
+    const packGrad = ctx.createLinearGradient(-48, 0, 0, 115);
+    packGrad.addColorStop(0, "#222730");
+    packGrad.addColorStop(1, "#0f1217");
+    ctx.fillStyle = packGrad;
+    ctx.strokeStyle = "#090b0e";
+    ctx.lineWidth = 2;
+    this.roundRect(ctx, -46, 4, 48, 108, 14, true, true);
+
+    // Bolso lateral com garrafa de água transparente
+    ctx.fillStyle = "rgba(210, 235, 255, 0.35)";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
+    ctx.lineWidth = 1.4;
+    this.roundRect(ctx, -38, 36, 16, 42, 6, true, true);
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(-33, 30, 6, 5);
+
+    // Isolante térmico azul enrolado no topo da mochila (detalhe idêntico à foto ref_whatsapp_1.jpeg!)
+    const matGrad = ctx.createLinearGradient(-50, -14, -10, 12);
+    matGrad.addColorStop(0, "#60a5fa");
+    matGrad.addColorStop(1, "#2563eb");
+    ctx.fillStyle = matGrad;
+    ctx.strokeStyle = "#1d4ed8";
+    ctx.lineWidth = 1.8;
+    this.roundRect(ctx, -48, -10, 42, 20, 9, true, true);
+
+    // Espiral lateral do rolo azul
+    ctx.fillStyle = "#93c5fd";
     ctx.beginPath();
-    ctx.moveTo(-52, shoulderY + 14);
-    ctx.quadraticCurveTo(0, shoulderY - 6, 52, shoulderY + 14);
-    ctx.lineTo(46 + windBreeze, hipY + 16);
-    ctx.quadraticCurveTo(0, hipY + 26, -44 + windBreeze * 0.6, hipY + 16);
+    ctx.arc(-12, 0, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#1e3a8a";
+    ctx.beginPath();
+    ctx.arc(-12, 0, 5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Fita preta prendendo o isolante azul
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(-32, -11, 6, 22);
+
+    ctx.restore();
+  }
+
+  /**
+   * Calça branca folgada de montanha com dobras anatômicas e botas de trekking
+   */
+  drawStandingLegsV5(ctx, hipY, hasCampfire) {
+    // Perna de trás (direita na vista)
+    this.drawBaggyPantLeg(ctx, 10, hipY, 22, hipY + 76, 20, -14, "#dce3ed", "#b0bccb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, 22, -6);
+
+    // Perna da frente (esquerda na vista)
+    this.drawBaggyPantLeg(ctx, -8, hipY, -4, hipY + 78, -8, -12, "#f5f8fc", "#c2cddb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, -6, -4);
+  }
+
+  drawWalkingLegsV5(ctx, hipY, cycle, hasCampfire) {
+    const s1 = Math.sin(cycle);
+    const c1 = Math.cos(cycle);
+
+    const s2 = Math.sin(cycle + Math.PI);
+    const c2 = Math.cos(cycle + Math.PI);
+
+    // Perna 1 (Traseira)
+    const k1x = 6 + s2 * 24;
+    const k1y = hipY + 74 - Math.max(0, c2) * 12;
+    const f1x = 4 + s2 * 36;
+    const f1y = -12 - Math.max(0, c2) * 18;
+    this.drawBaggyPantLeg(ctx, 4, hipY, k1x, k1y, f1x, f1y, "#dce3ed", "#b0bccb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, f1x + 2, f1y + 8);
+
+    // Perna 2 (Dianteira)
+    const k2x = 4 + s1 * 24;
+    const k2y = hipY + 74 - Math.max(0, c1) * 12;
+    const f2x = 2 + s1 * 36;
+    const f2y = -12 - Math.max(0, c1) * 18;
+    this.drawBaggyPantLeg(ctx, -4, hipY, k2x, k2y, f2x, f2y, "#f7f9fc", "#c2cddb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, f2x + 2, f2y + 8);
+  }
+
+  drawSeatedLegsV5(ctx, hipY, hasCampfire) {
+    // Perna de trás dobrada sobre a rocha
+    this.drawBaggyPantLeg(ctx, 8, hipY, 64, hipY + 10, 56, -16, "#dce3ed", "#b0bccb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, 58, -8);
+
+    // Perna da frente dobrada naturalmente (fiel a ref_whatsapp_2.jpeg)
+    this.drawBaggyPantLeg(ctx, -8, hipY + 4, 52, hipY + 16, 40, -12, "#f7f9fc", "#c2cddb", hasCampfire);
+    this.drawTrekkingBootV5(ctx, 42, -4);
+  }
+
+  /**
+   * Desenha uma perna de calça branca folgada de montanha com volume de tecido real e punho elástico no tornozelo
+   */
+  drawBaggyPantLeg(ctx, hx, hy, kx, ky, fx, fy, mainColor, shadowColor, hasCampfire) {
+    ctx.save();
+    const pantGrad = ctx.createLinearGradient(hx - 24, hy, fx + 28, fy);
+    pantGrad.addColorStop(0, shadowColor);
+    pantGrad.addColorStop(0.55, mainColor);
+    pantGrad.addColorStop(1, hasCampfire ? "#ffe4c4" : "#ffffff");
+
+    ctx.fillStyle = pantGrad;
+    ctx.strokeStyle = shadowColor;
+    ctx.lineWidth = 1.8;
+
+    // Polígono orgânico com curvas Bézier simulando o tecido folgado da calça branca
+    ctx.beginPath();
+    ctx.moveTo(hx - 20, hy);
+    ctx.quadraticCurveTo(kx - 26, (hy + ky) * 0.5, kx - 20, ky);
+    ctx.quadraticCurveTo(kx - 22, (ky + fy) * 0.55, fx - 13, fy);
+    ctx.lineTo(fx + 14, fy);
+    ctx.quadraticCurveTo(kx + 24, (ky + fy) * 0.55, kx + 20, ky);
+    ctx.quadraticCurveTo(kx + 22, (hy + ky) * 0.5, hx + 20, hy);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Luz de contorno (Rim-light) dourada/fogueira na lateral da jaqueta branca
-    ctx.strokeStyle = rimLightColor;
-    ctx.lineWidth = 3.5;
+    // Dobras sutis do tecido no joelho e tornozelo (fiel a ref_whatsapp_3.jpeg)
+    ctx.strokeStyle = "rgba(145, 160, 180, 0.45)";
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    if (isNightFire) {
-      ctx.moveTo(-51, shoulderY + 14);
-      ctx.lineTo(-43 + windBreeze * 0.6, hipY + 15);
-    } else {
-      ctx.moveTo(51, shoulderY + 14);
-      ctx.lineTo(45 + windBreeze, hipY + 15);
-    }
+    ctx.moveTo(kx - 10, ky - 4);
+    ctx.quadraticCurveTo(kx, ky + 3, kx + 12, ky - 2);
+    ctx.moveTo(fx - 11, fy - 5);
+    ctx.quadraticCurveTo(fx, fy - 2, fx + 11, fy - 5);
     ctx.stroke();
 
-    // Dobras anatômicas sutis do tecido e zíper frontal
-    ctx.strokeStyle = "rgba(160, 175, 195, 0.55)";
+    ctx.restore();
+  }
+
+  drawTrekkingBootV5(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = "#2b231d";
+    ctx.strokeStyle = "#120e0b";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(2, shoulderY + 6);
-    ctx.lineTo(2, hipY + 18);
-    ctx.moveTo(-26, shoulderY + 55);
-    ctx.quadraticCurveTo(-12, shoulderY + 75, -28, shoulderY + 110);
-    ctx.moveTo(26, shoulderY + 60);
-    ctx.quadraticCurveTo(14, shoulderY + 80, 28, shoulderY + 115);
+    ctx.moveTo(-14, -12);
+    ctx.lineTo(10, -12);
+    ctx.quadraticCurveTo(26, -4, 28, 6);
+    ctx.lineTo(28, 12);
+    ctx.lineTo(-16, 12);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
 
-    // Alças anatômicas da mochila nos ombros
-    ctx.strokeStyle = "#1c2026";
-    ctx.lineWidth = 9;
+    // Solado tratorado escuro
+    ctx.fillStyle = "#0f0d0c";
+    ctx.fillRect(-16, 9, 44, 5);
+    ctx.restore();
+  }
+
+  /**
+   * Tronco esculpido com jaqueta branca de montanha, zíper frontal, dobras e fitas pretas da mochila (fiel a ref_whatsapp_1.jpeg)
+   */
+  drawSculptedTorsoV5(ctx, torsoY, hipY, isSitting, hasCampfire) {
+    ctx.save();
+    const h = hipY - torsoY;
+
+    const jGrad = ctx.createLinearGradient(-34, torsoY, 38, hipY);
+    jGrad.addColorStop(0, "#d5deeb");
+    jGrad.addColorStop(0.5, "#f5f8fc");
+    jGrad.addColorStop(1, hasCampfire ? "#ffdfb8" : "#ffffff");
+
+    ctx.fillStyle = jGrad;
+    ctx.strokeStyle = "#b8c4d4";
+    ctx.lineWidth = 2;
+
+    // Silhueta anatômica do anorak branco (com leve volume frontal do blusão preso pelo cinto da mochila, igual a ref_whatsapp_1.jpeg!)
     ctx.beginPath();
-    ctx.moveTo(-40, shoulderY + 10);
-    ctx.quadraticCurveTo(-30, shoulderY + 70, -42, shoulderY + 125);
-    ctx.moveTo(38, shoulderY + 10);
-    ctx.quadraticCurveTo(28, shoulderY + 70, 40, shoulderY + 125);
+    ctx.moveTo(-24, torsoY + 6);
+    ctx.quadraticCurveTo(0, torsoY - 4, 24, torsoY + 8);
+    ctx.bezierCurveTo(36, torsoY + h * 0.35, 42, torsoY + h * 0.68, 28, hipY + 6);
+    ctx.quadraticCurveTo(0, hipY + 14, -26, hipY + 6);
+    ctx.bezierCurveTo(-32, torsoY + h * 0.65, -30, torsoY + h * 0.3, -24, torsoY + 6);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
 
-    // Gola alta corta-vento e capuz branco estruturado
-    ctx.fillStyle = "#f2f5f9";
-    ctx.strokeStyle = "#c5cfdc";
-    ctx.lineWidth = 2.5;
-    this.roundRect(ctx, -35, shoulderY - 14, 70, 26, 11, true, true);
+    // Capuz branco dobrado na gola / nuca (fiel a ref_whatsapp_2.jpeg)
+    ctx.fillStyle = "#edf2f8";
+    ctx.strokeStyle = "#b8c4d4";
+    ctx.beginPath();
+    ctx.moveTo(-28, torsoY + 12);
+    ctx.quadraticCurveTo(-40, torsoY - 8, -14, torsoY - 8);
+    ctx.lineTo(18, torsoY + 4);
+    ctx.quadraticCurveTo(0, torsoY + 18, -28, torsoY + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 
-    // 4. CABEÇA ILUSTRADA COM EXPRESSÃO FILOSÓFICA SERENA (Sem movimento de boca)
-    const headSwayX = Math.sin(this.time * 0.9) * 2.5;
-    const headY = shoulderY - 56 + breathY * 0.5;
-    this.drawRealisticHead(ctx, headSwayX, headY, isBlinking, rimLightColor);
+    // Alça preta de ombro, fita peitoral e cinto abdominal da mochila (idêntico a ref_whatsapp_1.jpeg!)
+    ctx.strokeStyle = "#161920";
+    ctx.lineWidth = 6.5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    // Alça que desce do ombro até a cintura
+    ctx.moveTo(-10, torsoY + 6);
+    ctx.quadraticCurveTo(10, torsoY + h * 0.45, 4, hipY - 12);
+    ctx.stroke();
 
-    // 5. BRAÇOS ARTICULADOS (OMBRO-COTOVELO-PUNHO) E CAJADO DE MADEIRA NATURAL
-    if (isWalking) {
-      const armSwing = -Math.sin(walkPhase) * 20;
-      this.drawAnatomicalArm(
-        ctx,
-        -48,
-        shoulderY + 18,
-        -60 + armSwing * 0.4,
-        shoulderY + 88,
-        -48 + armSwing,
-        shoulderY + 158,
-        "#e6ebf2",
-        "#bec8d6"
-      );
+    // Fita peitoral horizontal com fivela
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(4, torsoY + h * 0.36);
+    ctx.lineTo(33, torsoY + h * 0.36);
+    ctx.stroke();
 
-      const staffHandX = 80 - armSwing * 0.5;
-      const staffHandY = shoulderY + 74;
-      this.drawNaturalWoodStaff(
-        ctx,
-        staffHandX,
-        staffHandY - 145,
-        staffHandX + 14 - armSwing * 0.3,
-        -6,
-        false
-      );
-      this.drawAnatomicalArm(
-        ctx,
-        48,
-        shoulderY + 18,
-        66,
-        shoulderY + 86,
-        staffHandX,
-        staffHandY,
-        "#ffffff",
-        "#cad2de"
-      );
-    } else if (this.pose === "raising_staff") {
-      const floatY = Math.sin(this.time * 1.8) * 6;
-      this.drawAnatomicalArm(
-        ctx,
-        -48,
-        shoulderY + 18,
-        -76,
-        shoulderY + 68,
-        -92,
-        shoulderY + 42 + floatY,
-        "#edf1f7",
-        "#c2ccd9"
-      );
+    // Cinto abdominal preto na cintura
+    ctx.fillStyle = "#14171d";
+    this.roundRect(ctx, -27, hipY - 18, 56, 11, 4, true, false);
 
-      const staffHandX = 90;
-      const staffHandY = shoulderY + 18 + floatY;
-      this.drawNaturalWoodStaff(
-        ctx,
-        staffHandX + 6,
-        staffHandY - 145,
-        staffHandX - 4,
-        -8,
-        true
-      );
-      this.drawAnatomicalArm(
-        ctx,
-        48,
-        shoulderY + 18,
-        72,
-        shoulderY + 45,
-        staffHandX,
-        staffHandY,
-        "#ffffff",
-        "#cad2de"
-      );
-    } else if (this.pose === "seated_thinker") {
-      this.drawNaturalWoodStaff(ctx, -92, shoulderY - 35, -66, -12, false);
-      this.drawAnatomicalArm(
-        ctx,
-        -46,
-        shoulderY + 18,
-        -68,
-        shoulderY + 82,
-        -48,
-        shoulderY + 128,
-        "#e8edf5",
-        "#c2ccd9"
-      );
-      this.drawAnatomicalArm(
-        ctx,
-        46,
-        shoulderY + 18,
-        56,
-        shoulderY + 88,
-        10,
-        headY + 28,
-        "#ffffff",
-        "#cad2de"
-      );
-    } else if (this.pose === "teaching_gesture") {
-      const gY = shoulderY + 58 + Math.sin(this.time * 2.2) * 8;
-      this.drawAnatomicalArm(
-        ctx,
-        -48,
-        shoulderY + 18,
-        -82,
-        shoulderY + 76,
-        -104,
-        gY,
-        "#f2f5fa",
-        "#c2ccd9"
-      );
+    // Dobras naturais do tecido branco
+    ctx.strokeStyle = "rgba(155, 170, 190, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(14, torsoY + 12);
+    ctx.lineTo(18, hipY - 18);
+    ctx.moveTo(-6, torsoY + h * 0.52);
+    ctx.quadraticCurveTo(12, torsoY + h * 0.62, 26, torsoY + h * 0.56);
+    ctx.stroke();
 
-      const staffHandX = 84;
-      const staffHandY = shoulderY + 78;
-      this.drawNaturalWoodStaff(ctx, staffHandX, staffHandY - 140, staffHandX + 12, -8, false);
-      this.drawAnatomicalArm(
-        ctx,
-        48,
-        shoulderY + 18,
-        68,
-        shoulderY + 92,
-        staffHandX,
-        staffHandY,
-        "#ffffff",
-        "#cad2de"
-      );
+    ctx.restore();
+  }
+
+  /**
+   * Braço esculpido com manga de jaqueta branca e Luva Longa de Raspa com borda azul (fiel a ref_whatsapp_1.jpeg)
+   */
+  drawSculptedArm(ctx, sx, sy, ex, ey, hx, hy, hasLongGlove, hasCampfire) {
+    ctx.save();
+
+    // Manga superior e cotovelo com volume de tecido
+    ctx.strokeStyle = "#b8c4d4";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 26;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#f5f8fc";
+    ctx.lineWidth = 22;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+
+    if (hasLongGlove) {
+      // Luva longa de proteção até o meio do antebraço com Vivo Azul na borda (idêntico a ref_whatsapp_1.jpeg!)
+      const mx = ex + (hx - ex) * 0.32;
+      const my = ey + (hy - ey) * 0.32;
+
+      ctx.strokeStyle = "#c4bfb4";
+      ctx.lineWidth = 24;
+      ctx.beginPath();
+      ctx.moveTo(mx, my);
+      ctx.lineTo(hx, hy);
+      ctx.stroke();
+
+      ctx.strokeStyle = "#e3dfd5";
+      ctx.lineWidth = 20;
+      ctx.beginPath();
+      ctx.moveTo(mx, my);
+      ctx.lineTo(hx, hy);
+      ctx.stroke();
+
+      // Borda azul da luva longa de raspa
+      ctx.strokeStyle = "#2563eb";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(mx, my, 10, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Mão enluvada segurando o cajado
+      ctx.fillStyle = "#dcd7cc";
+      ctx.strokeStyle = "#a8a296";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     } else {
-      // standing_staff, seated_staff, campfire_circle
-      this.drawAnatomicalArm(
-        ctx,
-        -48,
-        shoulderY + 18,
-        -64,
-        shoulderY + 90,
-        -50 + windBreeze * 0.5,
-        shoulderY + 150,
-        "#eaf0f7",
-        "#c2ccd9"
-      );
-
-      const staffHandX = 82;
-      const staffHandY = shoulderY + 72;
-      this.drawNaturalWoodStaff(ctx, staffHandX - 6, staffHandY - 140, staffHandX + 18, -8, false);
-      this.drawAnatomicalArm(
-        ctx,
-        48,
-        shoulderY + 18,
-        68,
-        shoulderY + 88,
-        staffHandX,
-        staffHandY,
-        "#ffffff",
-        "#cad2de"
-      );
+      ctx.fillStyle = "#d9a784";
+      ctx.beginPath();
+      ctx.arc(hx, hy, 9.5, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     ctx.restore();
   }
 
-  drawAnatomicalLeg(ctx, hipX, hipY, kneeX, kneeY, footX, footY, color, strokeColor) {
+  /**
+   * Braço de reflexão com a mão no queixo (fiel a ref_whatsapp_2.jpeg e ref_whatsapp_3.jpeg)
+   */
+  drawThinkingArmV5(ctx, sx, sy, ex, ey, hx, hy, hasCampfire) {
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    // Coxa
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 40;
+    ctx.strokeStyle = "#b8c4d4";
+    ctx.lineWidth = 26;
     ctx.beginPath();
-    ctx.moveTo(hipX, hipY);
-    ctx.lineTo(kneeX, kneeY);
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(hx, hy);
     ctx.stroke();
 
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 35;
+    ctx.strokeStyle = "#f7f9fc";
+    ctx.lineWidth = 22;
     ctx.beginPath();
-    ctx.moveTo(hipX, hipY);
-    ctx.lineTo(kneeX, kneeY);
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(hx, hy);
     ctx.stroke();
 
-    // Panturrilha / Canela da calça
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 34;
+    // Mão pensativa tocando o queixo
+    ctx.fillStyle = "#dfa985";
+    ctx.strokeStyle = "#b58160";
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
-    ctx.moveTo(kneeX, kneeY);
-    ctx.lineTo(footX, footY);
-    ctx.stroke();
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 29;
-    ctx.beginPath();
-    ctx.moveTo(kneeX, kneeY);
-    ctx.lineTo(footX, footY);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  drawAnatomicalArm(ctx, shX, shY, elbX, elbY, handX, handY, color, strokeColor) {
-    ctx.save();
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 29;
-    ctx.beginPath();
-    ctx.moveTo(shX, shY);
-    ctx.lineTo(elbX, elbY);
-    ctx.lineTo(handX, handY);
-    ctx.stroke();
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 24;
-    ctx.beginPath();
-    ctx.moveTo(shX, shY);
-    ctx.lineTo(elbX, elbY);
-    ctx.lineTo(handX, handY);
-    ctx.stroke();
-
-    // Luva clara de proteção na montanha
-    ctx.fillStyle = "#e8ecf2";
-    ctx.strokeStyle = "#b5c0cf";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(handX, handY, 11.5, 0, Math.PI * 2);
+    ctx.ellipse(hx, hy, 10, 7, -0.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
   }
 
-  drawTrekkingBoot(ctx, x, y) {
+  /**
+   * Cabeça esculpida em Perfil 3/4 Contemplativo (fiel a ref_whatsapp_1.jpeg e ref_whatsapp_2.jpeg)
+   */
+  drawSculptedHeadV5(ctx, x, y, tilt, isBlinking, wind, hasCampfire) {
     ctx.save();
     ctx.translate(x, y);
-    ctx.fillStyle = "#22262e";
-    ctx.strokeStyle = "#111318";
-    ctx.lineWidth = 2.2;
-    this.roundRect(ctx, -18, -10, 42, 22, 8, true, true);
-    // Solado tratorado de trilha
-    ctx.fillStyle = "#111317";
-    ctx.fillRect(-16, 8, 38, 5);
-    ctx.restore();
-  }
+    ctx.rotate(tilt);
 
-  drawRealisticHead(ctx, x, y, isBlinking, rimLightColor) {
-    ctx.save();
-    ctx.translate(x, y);
+    // Pescoço anatômico
+    ctx.fillStyle = "#c9926e";
+    this.roundRect(ctx, -10, 14, 20, 24, 6, true, false);
 
-    if (this.headgear === "hat") {
-      const flapSway = Math.sin(this.time * 2.5) * 5;
-      ctx.fillStyle = "#e6ebf2";
-      ctx.strokeStyle = "#c2cbd6";
+    // Rosto esculpido em 3/4 (com linha de nariz, maçã do rosto e queixo sereno)
+    const faceGrad = ctx.createRadialGradient(8, -4, 4, 0, 0, 34);
+    faceGrad.addColorStop(0, hasCampfire ? "#f7c297" : "#ecc09d");
+    faceGrad.addColorStop(1, "#c48d68");
+    ctx.fillStyle = faceGrad;
+    ctx.strokeStyle = "#a67250";
+    ctx.lineWidth = 1.8;
+
+    ctx.beginPath();
+    ctx.moveTo(-18, -22);
+    ctx.quadraticCurveTo(14, -26, 22, -8);
+    // Curva do nariz em perfil 3/4
+    ctx.lineTo(27, 2);
+    ctx.quadraticCurveTo(26, 6, 21, 7);
+    // Lábios serenos e queixo firme
+    ctx.lineTo(20, 18);
+    ctx.quadraticCurveTo(16, 27, 2, 26);
+    ctx.quadraticCurveTo(-16, 24, -20, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Sobrancelha serena
+    ctx.strokeStyle = "#2d221c";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(4, -9);
+    ctx.quadraticCurveTo(12, -12, 19, -9);
+    ctx.stroke();
+
+    // Olho contemplativo voltado para o horizonte
+    if (isBlinking) {
+      ctx.strokeStyle = "#241b16";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(-36, -12);
-      ctx.lineTo(36, -12);
-      ctx.lineTo(43 + flapSway, 46);
-      ctx.quadraticCurveTo(0, 54, -43 + flapSway, 46);
+      ctx.moveTo(7, -3);
+      ctx.lineTo(16, -3);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = "#1c1512";
+      ctx.beginPath();
+      ctx.ellipse(12, -3, 2.8, 3.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(13, -4, 1.0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Semblante sereno (boca fechada, sem movimento labial)
+    ctx.strokeStyle = "#8a543b";
+    ctx.lineWidth = 1.9;
+    ctx.beginPath();
+    ctx.moveTo(10, 15);
+    ctx.quadraticCurveTo(16, 15.5, 20, 14.5);
+    ctx.stroke();
+
+    // Óculos de armação escura em perspectiva 3/4 com reflexo azulado da montanha (fiel a ref_whatsapp_1.jpeg!)
+    ctx.fillStyle = "rgba(185, 225, 255, 0.28)";
+    ctx.strokeStyle = "#1a1e26";
+    ctx.lineWidth = 2.2;
+    this.roundRect(ctx, 4, -10, 16, 13, 3.5, true, true);
+    this.roundRect(ctx, 21, -9, 7, 11, 2.5, true, true);
+    ctx.beginPath();
+    ctx.moveTo(4, -5);
+    ctx.lineTo(-10, -2);
+    ctx.stroke();
+
+    if (this.headgear === "hat") {
+      // Pano branco protetor de nuca e pescoço caindo sob o chapéu e ondulando ao vento (idêntico a ref_whatsapp_1.jpeg!)
+      const sway = wind * 0.9;
+      ctx.fillStyle = "#f0f4fa";
+      ctx.strokeStyle = "#bdcadb";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(-24, -12);
+      ctx.lineTo(8, -10);
+      ctx.quadraticCurveTo(12 + sway * 0.4, 24, 4 + sway * 0.8, 54);
+      ctx.quadraticCurveTo(-14 + sway, 62, -32 + sway, 46);
+      ctx.quadraticCurveTo(-34 + sway * 0.5, 16, -24, -12);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-    }
 
-    // Pescoço sombreado
-    ctx.fillStyle = "#cc9470";
-    this.roundRect(ctx, -13, 20, 26, 24, 8, true, false);
+      // Cordão preto do chapéu preso sob o queixo (fiel a ref_whatsapp_1.jpeg)
+      ctx.strokeStyle = "#181b22";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-2, -8);
+      ctx.quadraticCurveTo(2, 26, 12, 24);
+      ctx.stroke();
 
-    // Rosto com sombreamento tridimensional suave
-    const faceGrad = ctx.createRadialGradient(-6, -6, 6, 0, 2, 38);
-    faceGrad.addColorStop(0, "#ecc09d");
-    faceGrad.addColorStop(1, "#cfa07c");
-    ctx.fillStyle = faceGrad;
-    ctx.strokeStyle = "#b58360";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, 31, 37, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Sobrancelhas expressivas e serenas
-    ctx.strokeStyle = "#362a24";
-    ctx.lineWidth = 2.8;
-    ctx.beginPath();
-    ctx.moveTo(-20, -10);
-    ctx.quadraticCurveTo(-12, -13, -5, -10);
-    ctx.moveTo(5, -10);
-    ctx.quadraticCurveTo(12, -13, 20, -10);
-    ctx.stroke();
-
-    // Olhos contemplativos
-    ctx.fillStyle = "#1f1916";
-    if (isBlinking) {
+      // Copa do chapéu branco de trilha
+      ctx.fillStyle = "#f7f9fc";
+      ctx.strokeStyle = "#c0ccd9";
       ctx.lineWidth = 2.2;
       ctx.beginPath();
-      ctx.moveTo(-17, -3);
-      ctx.lineTo(-7, -3);
-      ctx.moveTo(7, -3);
-      ctx.lineTo(17, -3);
-      ctx.stroke();
-    } else {
-      ctx.beginPath();
-      ctx.arc(-12, -3, 3.2, 0, Math.PI * 2);
-      ctx.arc(12, -3, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      // Brilho de vida na pupila
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(-11, -4, 1.1, 0, Math.PI * 2);
-      ctx.arc(13, -4, 1.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Óculos de grau de armação fina escura com reflexo da montanha
-    ctx.strokeStyle = "#1c2128";
-    ctx.lineWidth = 2.3;
-    ctx.fillStyle = "rgba(200, 230, 255, 0.14)";
-    this.roundRect(ctx, -23, -10, 19, 14, 4, true, true);
-    this.roundRect(ctx, 4, -10, 19, 14, 4, true, true);
-    ctx.beginPath();
-    ctx.moveTo(-4, -4);
-    ctx.lineTo(4, -4);
-    ctx.moveTo(-23, -5);
-    ctx.lineTo(-30, -3);
-    ctx.moveTo(23, -5);
-    ctx.lineTo(30, -3);
-    ctx.stroke();
-
-    // Nariz anatômico
-    ctx.strokeStyle = "#ad7856";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, -3);
-    ctx.lineTo(-2, 9);
-    ctx.lineTo(3, 10);
-    ctx.stroke();
-
-    // Semblante fechado e sereno (Zero movimento de boca)
-    ctx.strokeStyle = "#875038";
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ctx.moveTo(-8, 21);
-    ctx.quadraticCurveTo(0, 22.5, 8, 21);
-    ctx.stroke();
-
-    // Chapéu branco de trilha ou Gorro branco de montanha
-    if (this.headgear === "hat") {
-      ctx.fillStyle = "#f7f9fc";
-      ctx.strokeStyle = "#c4cdd9";
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.moveTo(-33, -18);
-      ctx.quadraticCurveTo(-29, -47, 0, -47);
-      ctx.quadraticCurveTo(29, -47, 33, -18);
+      ctx.moveTo(-28, -14);
+      ctx.quadraticCurveTo(-24, -42, 2, -40);
+      ctx.quadraticCurveTo(24, -38, 26, -12);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
 
+      // Aba orgânica curvada do chapéu branco de trilha
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.ellipse(0, -18, 56, 11, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = "#f4f6fa";
-      ctx.strokeStyle = "#c4cdd9";
-      ctx.lineWidth = 2.4;
-      ctx.beginPath();
-      ctx.arc(0, -16, 34, Math.PI, 0);
+      ctx.moveTo(-46, -10);
+      ctx.quadraticCurveTo(-10, -22, 44, -8);
+      ctx.quadraticCurveTo(12, -2, -46, -10);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      this.roundRect(ctx, -35, -24, 70, 14, 6, true, true);
+    } else {
+      // Gorro branco canelado de montanha (fiel a ref_whatsapp_2.jpeg!)
+      ctx.fillStyle = "#f5f8fc";
+      ctx.strokeStyle = "#c0ccd9";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(-26, -6);
+      ctx.quadraticCurveTo(-28, -42, 2, -40);
+      ctx.quadraticCurveTo(26, -38, 25, -8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Dobra canelada do gorro branco
+      ctx.fillStyle = "#ffffff";
+      this.roundRect(ctx, -28, -17, 54, 13, 6, true, true);
     }
 
     ctx.restore();
@@ -1552,62 +1822,45 @@ class ImutavelCanvasEngine {
     ctx.save();
     ctx.lineCap = "round";
 
-    // Cajado orgânico de madeira esculpida pela natureza
-    ctx.strokeStyle = "#3d2412";
-    ctx.lineWidth = 12;
+    // Cajado longo de madeira avermelhada (fiel a ref_whatsapp_1.jpeg e ref_whatsapp_3.jpeg)
+    ctx.strokeStyle = "#4a2512";
+    ctx.lineWidth = 11.5;
     ctx.beginPath();
     ctx.moveTo(topX, topY);
-    ctx.bezierCurveTo(
-      topX - 6,
-      topY + (bottomY - topY) * 0.35,
-      bottomX + 5,
-      topY + (bottomY - topY) * 0.7,
-      bottomX,
-      bottomY
-    );
+    ctx.lineTo(bottomX, bottomY);
     ctx.stroke();
 
-    ctx.strokeStyle = "#7a4c28";
+    ctx.strokeStyle = "#8c4a27";
     ctx.lineWidth = 6.5;
     ctx.beginPath();
     ctx.moveTo(topX, topY);
-    ctx.bezierCurveTo(
-      topX - 6,
-      topY + (bottomY - topY) * 0.35,
-      bottomX + 5,
-      topY + (bottomY - topY) * 0.7,
-      bottomX,
-      bottomY
-    );
+    ctx.lineTo(bottomX, bottomY);
     ctx.stroke();
 
     if (hasSunBurst) {
-      const glow = ctx.createRadialGradient(topX, topY, 2, topX, topY, 45);
-      glow.addColorStop(0, "rgba(255, 238, 175, 0.75)");
+      const glow = ctx.createRadialGradient(topX, topY, 2, topX, topY, 48);
+      glow.addColorStop(0, "rgba(255, 238, 175, 0.80)");
       glow.addColorStop(1, "rgba(255, 238, 175, 0)");
       ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(topX, topY, 45, 0, Math.PI * 2);
+      ctx.arc(topX, topY, 48, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
   }
 
-  /**
-   * Vegetação rupestre de altitude balançando ao vento e fagulhas/brasas orgânicas
-   */
   drawForegroundNatureAndEmbers(ctx, W, H) {
     const floorY = H * 0.665;
     const isNight =
       this.environment === "night_campfire" || this.pose === "campfire_circle";
 
-    // Capim dourado da Chapada balançando na brisa da montanha
     ctx.save();
     ctx.strokeStyle = isNight ? "rgba(180, 130, 80, 0.45)" : "rgba(225, 195, 130, 0.55)";
     ctx.lineWidth = 2.2;
     this.grassTufts.forEach((g) => {
-      const gx = g.x * W;
-      const gy = floorY + 12 + Math.sin(g.phase) * 16;
+      let gx = g.x * W - (this.pose === "walking_trail" ? (this.time * 95) % W : 0);
+      if (gx < -30) gx += W + 60;
+      const gy = floorY + 14 + Math.sin(g.phase) * 16;
       const sway = Math.sin(this.time * 2.6 + g.phase) * 9;
 
       for (let b = 0; b < g.blades; b++) {
@@ -1625,7 +1878,6 @@ class ImutavelCanvasEngine {
     });
     ctx.restore();
 
-    // Fagulhas da fogueira ou pólen iluminado pelo sol
     this.embers.forEach((p) => {
       p.x += p.vx + Math.sin(this.time * 1.2 + p.phase) * 0.0003;
       p.y += p.vy;
@@ -1667,11 +1919,26 @@ class ImutavelCanvasEngine {
     ctx.restore();
   }
 
+  /**
+   * Centraliza texto de forma 100% determinística em iOS Safari, Android e Desktop
+   * (evitando o bug de WebKit onde emojis + textAlign="center" deslocam o texto para a direita!)
+   */
+  drawCenteredText(ctx, text, centerX, y, stroke = false) {
+    const clean = (text || "").trim();
+    ctx.textAlign = "left";
+    const metrics = ctx.measureText(clean);
+    const drawX = centerX - metrics.width / 2;
+    if (stroke) {
+      ctx.strokeText(clean, drawX, y);
+    }
+    ctx.fillText(clean, drawX, y);
+  }
+
   drawVideoHUDAndCaptions(ctx, W, H) {
     const isStories = this.currentFormat === "stories";
     const isSquare = this.currentFormat === "feed_square";
 
-    const barY = 28;
+    const barY = 26;
     const gap = 8;
     const totalBars = Math.max(1, this.totalScenes);
     const barW = (W - 90 - gap * (totalBars - 1)) / totalBars;
@@ -1691,63 +1958,68 @@ class ImutavelCanvasEngine {
       }
     }
 
-    const topY = 52;
+    // Pílula Superior de Ato (Sem emoji para 100% de precisão no iOS Safari!)
+    const topY = 50;
     ctx.save();
-    ctx.fillStyle = "rgba(10, 15, 26, 0.78)";
-    ctx.strokeStyle = "rgba(234, 197, 118, 0.65)";
+    ctx.fillStyle = "rgba(10, 15, 26, 0.82)";
+    ctx.strokeStyle = "rgba(234, 197, 118, 0.72)";
     ctx.lineWidth = 2.2;
-    const badgeW = Math.min(W - 80, 620);
+    const badgeW = Math.min(W - 70, 680);
     this.roundRect(ctx, (W - badgeW) / 2, topY, badgeW, 52, 26, true, true);
 
     ctx.fillStyle = "#ffe08a";
-    ctx.font = "700 22px 'Cinzel', Georgia, serif";
-    ctx.textAlign = "center";
+    ctx.font = "700 21px 'Cinzel', Georgia, serif";
     ctx.textBaseline = "middle";
-    ctx.fillText(
-      `⛰️ ${this.sceneTag.toUpperCase()} (${this.sceneIndex + 1}/${this.totalScenes})`,
+    const cleanTag = (this.sceneTag || "").replace(/[^\w\sÀ-ÿ•\-IVX0-9]/g, "").trim();
+    this.drawCenteredText(
+      ctx,
+      `◆ ${cleanTag.toUpperCase()} (${this.sceneIndex + 1}/${this.totalScenes}) ◆`,
       W / 2,
-      topY + 27
+      topY + 27,
+      false
     );
     ctx.restore();
 
-    const bottomMargin = isStories ? 90 : isSquare ? 40 : 68;
-    const boxW = W - 80;
-    const boxX = 40;
+    // Caixa Inferior de Legenda em Português-BR
+    const bottomMargin = isStories ? 80 : isSquare ? 36 : 56;
+    const boxW = W - 76;
+    const boxX = 38;
 
     ctx.save();
-    const fontSize = isSquare ? 34 : 38;
-    const lineHeight = isSquare ? 46 : 51;
+    const fontSize = isSquare ? 33 : 37;
+    const lineHeight = isSquare ? 45 : 50;
     ctx.font = `700 ${fontSize}px 'Inter', sans-serif`;
 
-    const lines = this.wrapText(ctx, this.subtitleText, boxW - 70);
-    const boxH = lines.length * lineHeight + 105;
+    const lines = this.wrapText(ctx, this.subtitleText, boxW - 68);
+    const boxH = lines.length * lineHeight + 104;
     const boxY = H - bottomMargin - boxH;
 
     ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
     ctx.shadowBlur = 24;
-    ctx.fillStyle = "rgba(8, 12, 21, 0.90)";
+    ctx.fillStyle = "rgba(8, 12, 21, 0.92)";
     ctx.strokeStyle = "#eac576";
     ctx.lineWidth = 2.8;
     this.roundRect(ctx, boxX, boxY, boxW, boxH, 22, true, true);
     ctx.shadowBlur = 0;
 
-    const pillW = 310;
+    // Pílula Dourada Superior da Legenda
+    const pillW = 340;
     ctx.fillStyle = "#eac576";
     this.roundRect(ctx, (W - pillW) / 2, boxY - 17, pillW, 34, 17, true, false);
     ctx.fillStyle = "#090d16";
-    ctx.font = "800 17px 'Inter', sans-serif";
-    ctx.textAlign = "center";
+    ctx.font = "800 16px 'Inter', sans-serif";
     ctx.textBaseline = "middle";
-    ctx.fillText("🗣️ LEGENDA • PORTUGUÊS (BR)", W / 2, boxY);
+    this.drawCenteredText(ctx, "◆ LEGENDA • PORTUGUÊS-BR ◆", W / 2, boxY, false);
 
+    // Barra de progresso interna da fala
     const progW = (boxW - 60) * Math.min(1, Math.max(0.05, this.sceneProgress));
     ctx.fillStyle = "rgba(234, 197, 118, 0.22)";
     this.roundRect(ctx, boxX + 30, boxY + boxH - 22, boxW - 60, 6, 3, true, false);
     ctx.fillStyle = "#ffe08a";
     this.roundRect(ctx, boxX + 30, boxY + boxH - 22, progW, 6, 3, true, false);
 
+    // Texto da Narração Centralizado
     ctx.font = `700 ${fontSize}px 'Inter', sans-serif`;
-    ctx.textAlign = "center";
     ctx.textBaseline = "top";
 
     const activeLineIndex = Math.min(
@@ -1756,11 +2028,9 @@ class ImutavelCanvasEngine {
     );
 
     lines.forEach((line, idx) => {
-      const ly = boxY + 30 + idx * lineHeight;
-
+      const ly = boxY + 28 + idx * lineHeight;
       ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
       ctx.lineWidth = 5;
-      ctx.strokeText(line, W / 2, ly);
 
       if (idx < activeLineIndex) {
         ctx.fillStyle = "#f1f5f9";
@@ -1769,12 +2039,14 @@ class ImutavelCanvasEngine {
       } else {
         ctx.fillStyle = "#ffffff";
       }
-      ctx.fillText(line, W / 2, ly);
+      this.drawCenteredText(ctx, line, W / 2, ly, true);
     });
 
+    // Rodapé do Tema dentro da caixa de legenda
     ctx.fillStyle = "#cbd5e1";
-    ctx.font = "600 20px 'Inter', sans-serif";
-    ctx.fillText(`✨ ${this.themeBadge}`, W / 2, boxY + boxH - 50);
+    ctx.font = "600 19px 'Inter', sans-serif";
+    const cleanTheme = (this.themeBadge || "").replace(/[^\w\sÀ-ÿ•\-(),:]/g, "").trim();
+    this.drawCenteredText(ctx, `◆ ${cleanTheme}`, W / 2, boxY + boxH - 48, false);
 
     ctx.restore();
   }

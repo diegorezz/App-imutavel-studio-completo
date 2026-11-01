@@ -68,15 +68,19 @@ body {
 }
 
 .brand-emblem {
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  flex-shrink: 0;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   border: 2px solid var(--gold-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(12, 18, 30, 0.8);
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   box-shadow: 0 0 20px rgba(234, 197, 118, 0.25);
 }
 
@@ -815,62 +819,104 @@ body {
 }
 
 @media (max-width: 768px) {
-  .auth-hero {
-    padding: 1.35rem 1.1rem;
-  }
-  .auth-hero h1 {
-    font-size: 1.55rem;
+  .auth-screen {
+    display: flex;
+    flex-direction: column;
   }
   .auth-panel-wrap {
-    padding: 1rem;
+    order: -1;
+    padding: 1rem 0.9rem 0.5rem;
   }
   .auth-card {
-    padding: 1.35rem;
+    padding: 1.25rem;
+  }
+  .auth-hero {
+    padding: 1.25rem 1rem 4.5rem;
+  }
+  .auth-hero h1 {
+    font-size: 1.35rem;
+  }
+  .hero-showcase {
+    margin: 1rem 0;
+  }
+  .studio-topbar {
+    padding: 0.6rem 0.85rem;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+  }
+  .studio-topbar .brand-subtitle {
+    display: none;
+  }
+  .studio-topbar .brand-title {
+    font-size: 0.98rem !important;
+  }
+  .brand-emblem {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    font-size: 1.1rem;
   }
   .studio-center-stage {
-    padding: 0.85rem 0.6rem;
+    padding: 0.7rem 0.55rem 1.2rem;
     order: -1;
+  }
+  .format-switcher-bar {
+    gap: 0.35rem;
+    margin-bottom: 0.55rem;
+  }
+  .format-quick-btn {
+    padding: 0.36rem 0.62rem;
+    font-size: 0.73rem;
+  }
+  .canvas-stage-wrapper {
+    max-height: none;
   }
   .canvas-stage-wrapper[data-format="reels"],
   .canvas-stage-wrapper[data-format="stories"] {
+    width: min(80vw, 31vh);
     height: auto;
-    width: min(86vw, 340px);
-    max-height: 62vh;
+    aspect-ratio: 9 / 16;
+    max-height: none;
   }
   .canvas-stage-wrapper[data-format="feed_portrait"] {
+    width: min(86vw, 42vh);
     height: auto;
-    width: min(90vw, 380px);
-    max-height: 56vh;
+    aspect-ratio: 4 / 5;
+    max-height: none;
   }
   .canvas-stage-wrapper[data-format="feed_square"] {
+    width: min(86vw, 48vh);
     height: auto;
-    width: min(90vw, 360px);
-    max-height: 52vh;
+    aspect-ratio: 1 / 1;
+    max-height: none;
   }
   .stage-controls-bar {
     flex-direction: column;
     align-items: stretch;
-    padding: 0.75rem;
+    padding: 0.65rem;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
   }
   .player-left-controls,
   .player-right-controls {
     width: 100%;
     justify-content: space-between;
     flex-wrap: wrap;
+    gap: 0.45rem;
   }
   .btn-play-main,
   .btn-export-main {
     width: 100%;
     text-align: center;
-    padding: 0.75rem;
-    font-size: 0.92rem;
-  }
-  .format-quick-btn {
-    padding: 0.4rem 0.68rem;
-    font-size: 0.74rem;
+    padding: 0.68rem;
+    font-size: 0.88rem;
   }
   .user-meta {
     display: none;
+  }
+  .studio-sidebar-right {
+    padding-bottom: 5rem;
   }
 }
 
@@ -883,8 +929,8 @@ body {
   background: rgba(11, 17, 29, 0.96);
   border: 2px solid var(--gold-primary);
   border-radius: var(--radius-md);
-  padding: 0.75rem 1.1rem;
-  margin-top: 0.65rem;
+  padding: 0.7rem 1rem;
+  margin-top: 0.6rem;
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.55);
 }
 
@@ -892,7 +938,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.3rem;
   flex-wrap: wrap;
   gap: 4px;
 }
@@ -903,22 +949,23 @@ body {
   border: 1px solid var(--gold-primary);
   padding: 2px 9px;
   border-radius: 99px;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.4px;
 }
 
 .ptbr-scene-badge {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   font-weight: 600;
 }
 
 .live-ptbr-text {
-  font-size: 0.96rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  line-height: 1.45;
+  line-height: 1.42;
   color: #ffffff;
   text-align: center;
 }
+
 

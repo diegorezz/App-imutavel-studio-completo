@@ -112,15 +112,12 @@
       <div class="brand-header">
         <div class="brand-emblem">⛰️</div>
         <div>
-          <div class="brand-title" style="font-size: 1.15rem;">IMUTÁVEL STUDIO</div>
-          <div class="brand-subtitle">Reels • Stories • Feed | Voz Neural de Filósofo & Legendas PT-BR</div>
+          <div class="brand-title" style="font-size: 1.1rem;">IMUTÁVEL STUDIO</div>
+          <div class="brand-subtitle">Reels • Stories • Feed | Voz Neural & Legendas PT-BR</div>
         </div>
       </div>
 
       <div class="user-top-profile">
-        <a href="/imutavel-studio-completo.zip" download="imutavel-studio-completo.zip" class="btn-secondary-sm" style="text-decoration: none; display: inline-flex; align-items: center; gap: 5px; border-color: var(--gold-primary); color: var(--gold-bright);" title="Baixar pasta ZIP com todos os arquivos do App">
-          📦 Baixar App (.ZIP)
-        </a>
         <div id="user-avatar-initials" class="user-avatar">IM</div>
         <div class="user-meta">
           <strong id="user-display-name">Buscador</strong>
@@ -181,28 +178,17 @@
           </div>
         </aside>
 
-        <!-- COLUNA CENTRAL: PALCO DO VÍDEO + BARRA DE LEGENDA PORTUGUÊS-BR VISÍVEL -->
+        <!-- COLUNA CENTRAL: PALCO DO VÍDEO + CONTROLES IMEDIATOS + LEGENDA PT-BR -->
         <section class="studio-center-stage">
           <div class="format-switcher-bar">
-            <button type="button" class="format-quick-btn active" data-format="reels">📱 Instagram Reels (9:16)</button>
-            <button type="button" class="format-quick-btn" data-format="stories">⚡ Instagram Stories (9:16)</button>
-            <button type="button" class="format-quick-btn" data-format="feed_portrait">🖼️ Feed Retrato (4:5)</button>
-            <button type="button" class="format-quick-btn" data-format="feed_square">⏹️ Feed Quadrado (1:1)</button>
+            <button type="button" class="format-quick-btn active" data-format="reels">📱 Reels (9:16)</button>
+            <button type="button" class="format-quick-btn" data-format="stories">⚡ Stories (9:16)</button>
+            <button type="button" class="format-quick-btn" data-format="feed_portrait">🖼️ Feed (4:5)</button>
+            <button type="button" class="format-quick-btn" data-format="feed_square">⏹️ Feed (1:1)</button>
           </div>
 
           <div id="canvas-stage-wrapper" class="canvas-stage-wrapper" data-format="reels">
             <canvas id="video-canvas" width="1080" height="1920"></canvas>
-          </div>
-
-          <!-- MELHORIA 2: Painel de Legenda em Português-BR Sincronizado e Sempre Visível -->
-          <div id="live-ptbr-subtitle-bar" class="live-ptbr-subtitle-bar">
-            <div class="live-ptbr-header">
-              <span class="ptbr-pill">🇧🇷 LEGENDA DA NARRAÇÃO • PORTUGUÊS-BR</span>
-              <span id="live-ptbr-scene-badge" class="ptbr-scene-badge">CENA 1/8</span>
-            </div>
-            <p id="live-ptbr-subtitle-text" class="live-ptbr-text">
-              "Por que descemos à matéria e caminhamos pelas provas deste mundo? A Lei de Encarnação revela o propósito sagrado da nossa existência."
-            </p>
           </div>
 
           <div class="stage-controls-bar">
@@ -214,8 +200,19 @@
               </label>
             </div>
             <div class="player-right-controls">
-              <button type="button" id="btn-export-video" class="btn-export-main">🎬 Exportar Vídeo (.WEBM / Reels)</button>
+              <button type="button" id="btn-export-video" class="btn-export-main">🎬 Exportar Vídeo (Reels / Feed)</button>
             </div>
+          </div>
+
+          <!-- Painel de Legenda em Português-BR Sincronizado -->
+          <div id="live-ptbr-subtitle-bar" class="live-ptbr-subtitle-bar">
+            <div class="live-ptbr-header">
+              <span class="ptbr-pill">🇧🇷 LEGENDA DA NARRAÇÃO • PORTUGUÊS-BR</span>
+              <span id="live-ptbr-scene-badge" class="ptbr-scene-badge">CENA 1/8</span>
+            </div>
+            <p id="live-ptbr-subtitle-text" class="live-ptbr-text">
+              "Por que descemos à matéria e caminhamos pelas provas deste mundo? A Lei de Encarnação revela o propósito sagrado da nossa existência."
+            </p>
           </div>
         </section>
 

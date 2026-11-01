@@ -1,5 +1,4 @@
 const http = require("http");
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
@@ -24,8 +23,7 @@ const MIME_TYPES = {
 const ttsAudioCache = new Map();
 
 /**
- * Perfis de Voz Neural Realista em Português-BR
- * Prosódia natural e humana (sem distorção de pitch/formantes)
+ * Perfis de Voz Neural Masculina Realista em Português-BR
  */
 const VOICE_PROFILES = {
   philosopher_deep: {
@@ -45,9 +43,15 @@ const VOICE_PROFILES = {
   }
 };
 
-/**
- * Prepara o texto com pontuação de respiração natural para leitura fluida e humana
- */
+const MALE_FALLBACK_VOICES = [
+  "pt-BR-AntonioNeural",
+  "pt-BR-DonatoNeural",
+  "pt-BR-NicolauNeural",
+  "pt-BR-FabioNeural",
+  "pt-BR-HumbertoNeural",
+  "pt-BR-ValerioNeural"
+];
+
 function formatPhilosophicalProsody(rawText) {
   return (rawText || "")
     .replace(/[""]/g, "")
@@ -55,6 +59,28 @@ function formatPhilosophicalProsody(rawText) {
     .replace(/\s*:\s*/g, "... ")
     .replace(/\s*—\s*/g, ", ")
     .trim();
+}
+
+async function tryEdgeVoice(voiceName, text, rate = "-4%", pitch = "-2Hz") {
+  const tts = new MsEdgeTTS();
+  await tts.setMetadata(
+    voiceName,
+    OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3
+  );
+  const { audioStream } = tts.toStream(text, { rate, pitch });
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const timer = setTimeout(() => reject(new Error("TTS Timeout")), 9000);
+    audioStream.on("data", (c) => chunks.push(c));
+    audioStream.on("end", () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks));
+    });
+    audioStream.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 }
 
 async function synthesizePhilosopherTTS(text, profileKey = "philosopher_deep") {
@@ -66,43 +92,31 @@ async function synthesizePhilosopherTTS(text, profileKey = "philosopher_deep") {
 
   const profile = VOICE_PROFILES[profileKey] || VOICE_PROFILES.philosopher_deep;
 
+  // 1. Tenta a voz neural masculina principal escolhida
   try {
-    const tts = new MsEdgeTTS();
-    await tts.setMetadata(
+    const buffer = await tryEdgeVoice(
       profile.voiceName,
-      OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3
+      naturalText,
+      profile.rate,
+      profile.pitch
     );
-    const { audioStream } = tts.toStream(naturalText, {
-      rate: profile.rate,
-      pitch: profile.pitch
-    });
-
-    const buffer = await new Promise((resolve, reject) => {
-      const chunks = [];
-      audioStream.on("data", (c) => chunks.push(c));
-      audioStream.on("end", () => resolve(Buffer.concat(chunks)));
-      audioStream.on("error", reject);
-    });
-
     if (buffer && buffer.length > 200) {
       ttsAudioCache.set(cacheKey, buffer);
       return buffer;
     }
   } catch (err) {
-    console.warn("Tentando voz neural alternativa:", err.message);
+    console.warn("Tentando voz neural masculina reserva:", err.message);
+  }
+
+  // 2. Tenta as demais vozes neurais masculinas PT-BR (nunca cai em voz feminina)
+  for (const fallbackVoice of MALE_FALLBACK_VOICES) {
     try {
-      const fallbackTts = new MsEdgeTTS();
-      await fallbackTts.setMetadata(
-        "pt-BR-AntonioNeural",
-        OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3
+      const buffer = await tryEdgeVoice(
+        fallbackVoice,
+        naturalText,
+        "-4%",
+        "-2Hz"
       );
-      const { audioStream } = fallbackTts.toStream(naturalText);
-      const buffer = await new Promise((resolve, reject) => {
-        const chunks = [];
-        audioStream.on("data", (c) => chunks.push(c));
-        audioStream.on("end", () => resolve(Buffer.concat(chunks)));
-        audioStream.on("error", reject);
-      });
       if (buffer && buffer.length > 200) {
         ttsAudioCache.set(cacheKey, buffer);
         return buffer;
@@ -110,41 +124,42 @@ async function synthesizePhilosopherTTS(text, profileKey = "philosopher_deep") {
     } catch (e2) {}
   }
 
-  return new Promise((resolve, reject) => {
-    const gUrl =
-      "https://translate.googleapis.com/translate_tts?ie=UTF-8&q=" +
-      encodeURIComponent(naturalText.substring(0, 200)) +
-      "&tl=pt-BR&client=tw-ob";
-    https
-      .get(gUrl, (gRes) => {
-        const chunks = [];
-        gRes.on("data", (d) => chunks.push(d));
-        gRes.on("end", () => {
-          const buf = Buffer.concat(chunks);
-          ttsAudioCache.set(cacheKey, buf);
-          resolve(buf);
-        });
-      })
-      .on("error", reject);
-  });
+  throw new Error("Serviço de voz neural temporariamente indisponível");
 }
 
-const server = http.createServer(async (req, res) => {
-  const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
-  const cleanUrl = decodeURIComponent(parsedUrl.pathname);
+async function requestHandler(req, res) {
+  const host = req.headers.host || `localhost:${PORT}`;
+  const parsedUrl = new URL(req.url, `http://${host}`);
+  const rawPathname = decodeURIComponent(parsedUrl.pathname);
+  const cleanUrl = rawPathname.replace(/^\/public/, "") || "/";
 
-  if (cleanUrl === "/api/health") {
-    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ status: "ok", app: "IMUTAVEL_STUDIO", version: "4.0.0" }));
+  // Cabeçalhos CORS para garantir funcionamento em qualquer domínio mobile/Vercel
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
     return;
   }
 
-  if (cleanUrl === "/api/tts") {
+  if (cleanUrl === "/api/health" || cleanUrl.endsWith("/api/health")) {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ status: "ok", app: "IMUTAVEL_STUDIO", version: "5.0.0" }));
+    return;
+  }
+
+  if (
+    cleanUrl === "/api/tts" ||
+    cleanUrl === "/api/tts.js" ||
+    cleanUrl.endsWith("/api/tts") ||
+    cleanUrl.endsWith("/api/tts.js")
+  ) {
     const text = (parsedUrl.searchParams.get("text") || "").trim();
     const voice = parsedUrl.searchParams.get("voice") || "philosopher_deep";
 
     if (!text) {
-      res.writeHead(400);
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Missing text");
       return;
     }
@@ -158,8 +173,8 @@ const server = http.createServer(async (req, res) => {
       });
       res.end(mp3Buffer);
     } catch (e) {
-      res.writeHead(500);
-      res.end("TTS Error");
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("TTS Error: " + e.message);
     }
     return;
   }
@@ -200,10 +215,16 @@ const server = http.createServer(async (req, res) => {
     });
     fs.createReadStream(filePath).pipe(res);
   });
-});
+}
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`====================================================`);
-  console.log(`⛰️  IMUTÁVEL STUDIO RODANDO EM: http://localhost:${PORT}`);
-  console.log(`====================================================`);
-});
+// Exporta para Vercel Serverless (@vercel/node) e também escuta localmente se executado diretamente
+module.exports = requestHandler;
+
+if (require.main === module) {
+  const server = http.createServer(requestHandler);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`====================================================`);
+    console.log(`⛰️  IMUTÁVEL STUDIO V5 RODANDO EM: http://localhost:${PORT}`);
+    console.log(`====================================================`);
+  });
+}
