@@ -1,0 +1,13 @@
+{
+  "name": "imutavel-studio",
+  "version": "1.0.0",
+  "description": "Plataforma responsiva para geração de vídeos animados (Reels, Stories, Feed) baseada exclusivamente na pasta Google Drive Projeto IMUTAVEL",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.1.1"
+  }
+}
